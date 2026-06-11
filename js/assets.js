@@ -870,3 +870,120 @@ const WEAPON_CANVAS = (() => {
 })();
 // energy cell rect in weapon-local logical coords (for the live glow)
 const WEAPON_CELL = { x: 95 - 26, y: 126, w: 30, h: 16 };
+
+// -------------------------------------------------------------- HUD bar
+// Pre-rendered Doom-style status bar plate (640x64 logical, drawn at 2x):
+// brushed metal, bevelled edges, recessed instrument panels, screws and
+// hazard-stripe end caps. Live numbers/face are drawn over it by the game.
+
+const HUD_PANELS = {
+  health: { x: 20, y: 8, w: 120, h: 48, cx: 80 },
+  ammo:   { x: 150, y: 8, w: 120, h: 48, cx: 210 },
+  face:   { x: 291, y: 5, w: 58, h: 54, cx: 320 },
+  kills:  { x: 370, y: 8, w: 120, h: 48, cx: 430 },
+  hints:  { x: 500, y: 8, w: 126, h: 48, cx: 563 },
+};
+
+const HUD_CANVAS = (() => {
+  const c = document.createElement("canvas");
+  c.width = 640 * 2;
+  c.height = 64 * 2;
+  const g = c.getContext("2d");
+  g.scale(2, 2);
+
+  // base metal plate
+  const base = g.createLinearGradient(0, 0, 0, 64);
+  base.addColorStop(0, "#383c45");
+  base.addColorStop(0.14, "#2b2e36");
+  base.addColorStop(1, "#15171c");
+  g.fillStyle = base;
+  g.fillRect(0, 0, 640, 64);
+
+  // brushed-metal scratches
+  for (let i = 0; i < 260; i++) {
+    const y = 3 + rnd() * 58;
+    g.fillStyle = rnd() < 0.5 ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.06)";
+    g.fillRect(rnd() * 640, y, 10 + rnd() * 50, 1);
+  }
+  // dents
+  for (let i = 0; i < 14; i++) {
+    g.fillStyle = "rgba(0,0,0,0.12)";
+    g.beginPath();
+    g.arc(rnd() * 640, 6 + rnd() * 52, 1 + rnd() * 2, 0, 7);
+    g.fill();
+  }
+
+  // top ridge + bottom shadow
+  g.fillStyle = "rgba(255,255,255,0.2)";
+  g.fillRect(0, 0, 640, 2);
+  g.fillStyle = "rgba(0,0,0,0.55)";
+  g.fillRect(0, 2, 640, 1.5);
+  g.fillRect(0, 61, 640, 3);
+
+  // hazard-stripe end caps
+  for (const x0 of [0, 630]) {
+    g.save();
+    g.beginPath();
+    g.rect(x0, 3, 10, 58);
+    g.clip();
+    g.fillStyle = "#8f7a1e";
+    g.fillRect(x0, 3, 10, 58);
+    g.fillStyle = "#16161a";
+    for (let y = -10; y < 70; y += 10) {
+      g.beginPath();
+      g.moveTo(x0, y + 10);
+      g.lineTo(x0 + 10, y);
+      g.lineTo(x0 + 10, y + 5);
+      g.lineTo(x0, y + 15);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+    g.fillStyle = "rgba(0,0,0,0.4)";
+    g.fillRect(x0 + (x0 ? -1.5 : 10), 3, 1.5, 58);
+  }
+
+  // recessed instrument panels
+  const inset = (x, y, w, h) => {
+    g.fillStyle = "rgba(0,0,0,0.5)";
+    g.fillRect(x - 2, y - 2, w + 4, h + 4);
+    const f = g.createLinearGradient(0, y, 0, y + h);
+    f.addColorStop(0, "#08090c");
+    f.addColorStop(1, "#13151b");
+    g.fillStyle = f;
+    g.fillRect(x, y, w, h);
+    g.fillStyle = "rgba(0,0,0,0.65)";
+    g.fillRect(x, y, w, 2);
+    g.fillRect(x, y, 1.5, h);
+    g.fillStyle = "rgba(255,255,255,0.1)";
+    g.fillRect(x, y + h - 1.2, w, 1.2);
+  };
+  for (const p of Object.values(HUD_PANELS)) inset(p.x, p.y, p.w, p.h);
+
+  // screws between panels
+  const screw = (x, y) => {
+    g.fillStyle = "#4a505e";
+    g.beginPath();
+    g.arc(x, y, 2.4, 0, 7);
+    g.fill();
+    g.fillStyle = "rgba(255,255,255,0.3)";
+    g.beginPath();
+    g.arc(x - 0.7, y - 0.7, 1, 0, 7);
+    g.fill();
+    g.strokeStyle = "#15171c";
+    g.lineWidth = 0.9;
+    const a = rnd() * 3;
+    g.beginPath();
+    g.moveTo(x - Math.cos(a) * 1.8, y - Math.sin(a) * 1.8);
+    g.lineTo(x + Math.cos(a) * 1.8, y + Math.sin(a) * 1.8);
+    g.stroke();
+  };
+  for (const x of [145, 280, 360, 494]) {
+    screw(x, 10);
+    screw(x, 54);
+  }
+  screw(16, 32);
+  screw(624, 32);
+
+  return c;
+})();

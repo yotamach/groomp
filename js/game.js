@@ -801,86 +801,205 @@ function drawWeapon() {
 
 function drawFace(x, y, hpRatio) {
   const t = now;
+  const hurt = damageFlash > 0.25 && hpRatio > 0;
   ctx.save();
   ctx.translate(x, y);
-  // helmet + skin
-  ctx.fillStyle = "#3c4a32";
-  ctx.fillRect(-17, -26, 34, 14);
-  ctx.fillStyle = hpRatio > 0 ? "#d8a070" : "#9a8a78";
-  ctx.fillRect(-15, -16, 30, 36);
-  // damage grime
+
+  // shoulders + neck
+  ctx.fillStyle = "#2c3824";
+  ctx.fillRect(-21, 17, 42, 9);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(-21, 17, 42, 1.5);
+  const skin = hpRatio <= 0 ? "#9a8a78" : "#d8a070";
+  ctx.fillStyle = hpRatio <= 0 ? "#7e6f60" : "#b9854f";
+  ctx.fillRect(-5, 12, 10, 6);
+
+  // head
+  ctx.fillStyle = skin;
+  ctx.fillRect(-14, -14, 28, 30);
+  // ears
+  ctx.fillRect(-16, -4, 2, 7);
+  ctx.fillRect(14, -4, 2, 7);
+  // side + jaw shading
+  ctx.fillStyle = "rgba(60,25,10,0.22)";
+  ctx.fillRect(8, -14, 6, 30);
+  ctx.fillRect(-14, 12, 28, 4);
+
+  // helmet with visor band
+  const hm = ctx.createLinearGradient(0, -27, 0, -10);
+  hm.addColorStop(0, "#55663f");
+  hm.addColorStop(1, "#2a3520");
+  ctx.fillStyle = hm;
+  ctx.fillRect(-17, -27, 34, 14);
+  ctx.fillRect(-17, -15, 4, 7);
+  ctx.fillRect(13, -15, 4, 7);
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.fillRect(-17, -26, 34, 2);
+  ctx.fillStyle = "#1a2113";
+  ctx.fillRect(-17, -14, 34, 1.5);
+  // brow shadow under helmet rim
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.fillRect(-14, -13, 28, 3);
+
+  // damage: grime and blood by tier
   if (hpRatio < 0.7) {
-    ctx.fillStyle = "rgba(150,30,20,0.5)";
-    ctx.fillRect(-15, 6, 12, 14);
+    ctx.fillStyle = "rgba(140,28,18,0.55)";
+    ctx.fillRect(-14, 4, 10, 12);
+    ctx.fillRect(5, -2, 4, 8);
   }
-  if (hpRatio < 0.4) {
-    ctx.fillStyle = "rgba(150,30,20,0.65)";
-    ctx.fillRect(4, -10, 11, 18);
+  if (hpRatio < 0.4 && hpRatio > 0) {
+    ctx.fillStyle = "rgba(165,25,12,0.8)";
+    ctx.fillRect(-3, -13, 3, 14);  // forehead drip
+    ctx.fillRect(-2, 1, 5, 4);
+    ctx.fillRect(6, 6, 8, 10);
+    ctx.fillStyle = "rgba(120,18,8,0.6)";
+    ctx.fillRect(-14, -8, 6, 9);
   }
-  // eyes (dart around like the Doom marine)
-  const look = hpRatio <= 0 ? 0 : Math.sin(t * 0.9) * 3;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(-11, -8, 9, 6);
-  ctx.fillRect(2, -8, 9, 6);
-  ctx.fillStyle = "#222";
+
+  // eyebrows angle down as health drops
+  const angry = (1 - hpRatio) * 3.5;
+  ctx.fillStyle = "#5a3a1c";
+  ctx.save();
+  ctx.translate(-7, -9);
+  ctx.rotate(angry * 0.09);
+  ctx.fillRect(-5, 0, 10, 2.4);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(7, -9);
+  ctx.rotate(-angry * 0.09);
+  ctx.fillRect(-5, 0, 10, 2.4);
+  ctx.restore();
+
+  // eyes: dart around, blink, squeeze shut when hit
+  const blink = hpRatio > 0 && (t % 3.7) > 3.55;
   if (hpRatio <= 0) {
-    ctx.fillRect(-11, -6, 9, 2);
-    ctx.fillRect(2, -6, 9, 2);
-  } else {
-    ctx.fillRect(-9 + look, -7, 4, 5);
-    ctx.fillRect(4 + look, -7, 4, 5);
-  }
-  // mouth by health tier
-  ctx.fillStyle = "#5a2a1a";
-  if (hpRatio <= 0) ctx.fillRect(-6, 10, 12, 3);
-  else if (hpRatio > 0.7) ctx.fillRect(-7, 10, 14, 3);
-  else if (hpRatio > 0.4) ctx.fillRect(-5, 11, 10, 3);
-  else {
+    ctx.fillStyle = "#3a3530";
+    ctx.fillRect(-11, -5, 9, 2);
+    ctx.fillRect(2, -5, 9, 2);
+  } else if (hurt || blink) {
+    ctx.strokeStyle = "#3a2410";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(0, 13, 5, Math.PI, 0);
+    if (hurt) {
+      ctx.moveTo(-11, -6); ctx.lineTo(-6, -3); ctx.lineTo(-11, 0);
+      ctx.moveTo(11, -6); ctx.lineTo(6, -3); ctx.lineTo(11, 0);
+    } else {
+      ctx.moveTo(-11, -3); ctx.lineTo(-2, -3);
+      ctx.moveTo(2, -3); ctx.lineTo(11, -3);
+    }
+    ctx.stroke();
+  } else {
+    const look = Math.sin(t * 0.9) * 3;
+    ctx.fillStyle = "#f4efe6";
+    ctx.fillRect(-11, -6, 9, 6);
+    ctx.fillRect(2, -6, 9, 6);
+    ctx.fillStyle = "#1c1a18";
+    ctx.fillRect(-9 + look, -5.4, 4, 5);
+    ctx.fillRect(4 + look, -5.4, 4, 5);
+  }
+
+  // mouth by tier; gritted teeth when hurt
+  if (hpRatio <= 0) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-6, 9, 12, 2.5);
+  } else if (hurt) {
+    ctx.fillStyle = "#3a1408";
+    ctx.fillRect(-7, 7, 14, 6);
+    ctx.fillStyle = "#e8e0d0";
+    ctx.fillRect(-6, 8, 12, 1.8);
+    ctx.fillRect(-6, 10.6, 12, 1.6);
+  } else if (hpRatio > 0.7) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-7, 9, 14, 2.5);
+  } else if (hpRatio > 0.4) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-5, 10, 10, 2.5);
+    ctx.fillRect(-7, 8.5, 3, 2.5);
+  } else {
+    ctx.fillStyle = "#3a1408";
+    ctx.beginPath();
+    ctx.arc(0, 12, 4.5, Math.PI, 0);
     ctx.fill();
   }
   ctx.restore();
 }
 
 function drawHud() {
-  ctx.fillStyle = "#16161a";
-  ctx.fillRect(0, LH - HUD_H, LW, HUD_H);
-  ctx.fillStyle = "#34343c";
-  ctx.fillRect(0, LH - HUD_H, LW, 3);
-
-  const baseY = LH - HUD_H / 2;
+  const top = LH - HUD_H;
+  ctx.drawImage(HUD_CANVAS, 0, top, LW, HUD_H);
   ctx.textAlign = "center";
 
+  // glowing LED-style number
+  const led = (txt, cx, color, size) => {
+    ctx.font = `bold ${size}px monospace`;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = color;
+    ctx.fillText(txt, cx, top + 34);
+    ctx.fillText(txt, cx, top + 34);
+    ctx.restore();
+  };
+  // engraved label
+  const label = (txt, cx) => {
+    ctx.font = "9px monospace";
+    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fillText(txt, cx, top + 51);
+    ctx.fillStyle = "rgba(190,200,215,0.45)";
+    ctx.fillText(txt, cx, top + 52);
+  };
+  // slotted meter bar
+  const meter = (cx, frac, color) => {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(cx - 44, top + 39, 88, 4);
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - 43, top + 40, 86 * Math.max(0, Math.min(1, frac)), 2);
+  };
+
+  const P = HUD_PANELS;
   const hpCol = player.hp > 60 ? "#3fe06a" : player.hp > 25 ? "#e0b03f" : "#e03f3f";
-  ctx.fillStyle = hpCol;
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${player.hp}%`, 80, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("HEALTH", 80, baseY + 24);
+  led(`${player.hp}%`, P.health.cx, hpCol, 26);
+  meter(P.health.cx, player.hp / 100, hpCol);
+  label("HEALTH", P.health.cx);
 
-  ctx.fillStyle = "#e0c63f";
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${player.ammo}`, 210, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("AMMO", 210, baseY + 24);
+  const amCol = player.ammo > 8 ? "#e0c63f" : "#e03f3f";
+  led(`${player.ammo}`, P.ammo.cx, amCol, 26);
+  meter(P.ammo.cx, player.ammo / 60, amCol);
+  label("AMMO", P.ammo.cx);
 
-  drawFace(LW / 2, baseY, player.hp / 100);
+  drawFace(P.face.cx, top + 30, player.hp / 100);
 
-  ctx.fillStyle = "#e08f3f";
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${kills}/${totalEnemies}`, 430, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("GROOMPS", 430, baseY + 24);
+  led(`${kills}/${totalEnemies}`, P.kills.cx, "#e08f3f", 24);
+  meter(P.kills.cx, kills / totalEnemies, "#e08f3f");
+  label("GROOMPS", P.kills.cx);
 
-  ctx.fillStyle = "#55555f";
-  ctx.font = "11px monospace";
-  ctx.fillText("M map", 560, baseY - 6);
-  ctx.fillText("N music", 560, baseY + 8);
-  ctx.fillText("R restart", 560, baseY + 22);
+  // keycap hints
+  const keycap = (key, desc, row) => {
+    const y = top + 13 + row * 14;
+    const x = P.hints.x + 10;
+    ctx.fillStyle = "#101216";
+    ctx.fillRect(x, y + 1.5, 13, 11);
+    const kg = ctx.createLinearGradient(0, y, 0, y + 11);
+    kg.addColorStop(0, "#4a505e");
+    kg.addColorStop(1, "#2c313c");
+    ctx.fillStyle = kg;
+    ctx.fillRect(x, y, 13, 11);
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillRect(x, y, 13, 1.2);
+    ctx.font = "bold 8px monospace";
+    ctx.fillStyle = "#e8e8ee";
+    ctx.fillText(key, x + 6.5, y + 8);
+    ctx.font = "8px monospace";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fillText(desc, x + 18, y + 8);
+    ctx.fillStyle = "rgba(190,200,215,0.5)";
+    ctx.fillText(desc, x + 18, y + 9);
+    ctx.textAlign = "center";
+  };
+  keycap("M", "MAP", 0);
+  keycap("N", "MUSIC", 1);
+  keycap("R", "RESTART", 2);
 }
 
 function drawMinimap() {
