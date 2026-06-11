@@ -74,6 +74,37 @@ const Sfx = (() => {
       noiseBurst(0.16, 0.5, 1700);
       blip("square", 170, 38, 0.13, 0.4);
     },
+    fire(slot) {
+      if (slot === 3) {        // shotgun
+        noiseBurst(0.32, 0.7, 1100);
+        blip("square", 110, 28, 0.26, 0.5);
+      } else if (slot === 4) { // chaingun
+        noiseBurst(0.07, 0.4, 2400);
+        blip("square", 220, 70, 0.05, 0.28);
+      } else if (slot === 5) { // rocket launch
+        noiseBurst(0.45, 0.5, 750);
+        blip("sawtooth", 85, 26, 0.5, 0.45);
+      } else if (slot === 6) { // plasma
+        blip("square", 880, 220, 0.12, 0.28);
+        blip("sine", 1320, 330, 0.1, 0.18);
+      } else if (slot === 7) { // the GBFG
+        blip("sawtooth", 55, 220, 0.5, 0.5);
+        blip("square", 28, 90, 0.65, 0.4);
+        noiseBurst(0.5, 0.4, 520);
+      } else {
+        this.shoot();
+      }
+    },
+    swing() { noiseBurst(0.12, 0.22, 650); },
+    thunk() {
+      blip("square", 95, 38, 0.13, 0.5);
+      noiseBurst(0.09, 0.3, 420);
+    },
+    scream() {
+      blip("sawtooth", 950, 210, 0.85, 0.35);
+      blip("sawtooth", 1180, 320, 0.7, 0.25, 0.06);
+      noiseBurst(0.4, 0.15, 3200);
+    },
     empty() { blip("square", 1300, 900, 0.04, 0.12); },
     enemyHit() { blip("square", 520, 180, 0.09, 0.3); },
     enemyDie() {
@@ -81,6 +112,11 @@ const Sfx = (() => {
       noiseBurst(0.3, 0.3, 700);
     },
     growl() { blip("sawtooth", 95, 55, 0.35, 0.3); },
+    boom() {
+      noiseBurst(0.5, 0.6, 900);
+      blip("sawtooth", 90, 24, 0.6, 0.55);
+      blip("square", 50, 18, 0.8, 0.4, 0.05);
+    },
     spit() { blip("sine", 750, 180, 0.22, 0.25); },
     hurt() {
       blip("sawtooth", 120, 50, 0.28, 0.5);

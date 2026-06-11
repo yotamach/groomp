@@ -1,0 +1,40 @@
+{
+  "name": "groomp",
+  "version": "1.0.0",
+  "description": "GROOMP — a Doom-like blobshooter",
+  "author": "yotamach",
+  "license": "MIT",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2"
+  },
+  "build": {
+    "appId": "io.github.yotamach.groomp",
+    "productName": "GROOMP",
+    "directories": {
+      "buildResources": "desktop",
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "js/**",
+      "desktop/**"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.games"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Game"
+    }
+  }
+}

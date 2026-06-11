@@ -6,8 +6,9 @@
 
 (() => {
 
-const W = 640, H = 400;
-const HUD_H = 64;
+const W = 1280, H = 800;   // internal 3D render resolution
+const LW = 640, LH = 400;  // logical coordinate space for the 2D overlay
+const HUD_H = 64;          // in logical units
 const FOV = 0.66; // camera plane length (~66 degrees)
 
 const canvas = document.getElementById("screen");
@@ -20,43 +21,51 @@ const zbuf = new Float32Array(W);
 // ------------------------------------------------------------------ map
 // '#' brick  '%' stone  '=' tech  '&' slime  '.' floor  'X' exit pad
 // 'P' player  'g' groomp  's' spitter  'B' boss groomp  'h' medkit  'a' ammo
+// 'l' hanging lamp  'b' exploding barrel  'k' bone pile
 
 const MAP_STR = [
   "########################################",
   "#.........#.................#..........#",
-  "#....a....#.........a.......#........h.#",
-  "#..P......#....%.......%....#..........#",
-  "#...........................#..........#",
-  "#..................g.....g.......s.....#",
-  "#.........#............................#",
-  "#.........#....%.......%....#..........#",
-  "###########.h............g..#..........#",
-  "###########.................#.......s..#",
-  "##################..#########..a.......#",
-  "##################..#########..........#",
-  "##################..#########&&&&&&&&&&&",
+  "#....a....#.........a.....b.#....c...h.#",
+  "#..P......#....%.c...c.%....#........b.#",
+  "#....l.......3.....l........#.....l....#",
+  "#.........a........g.....g.....q.s..f..#",
+  "#.......b.#.....o....h..k..............#",
+  "#......k..#....%.......%....#....k.w...#",
+  "###########.h.......m....g..#.....a....#",
+  "###########...e.............#.b.....s..#",
+  "##################6.#########..a...4...#",
+  "##################q.#########......o...#",
+  "##################l.#########&&&&&&&&&&&",
   "##################..####################",
-  "#......=.........................#######",
+  "#.k....=.....................a...#######",
   "#..a...=.h......................a#######",
-  "#......=....g...............g....#######",
-  "#......=.........................#######",
-  "#X..................a............#######",
-  "#X..B............................#######",
-  "#X.....=.........................#######",
-  "#......=.........................#######",
-  "#......=..s.........g.........s..#######",
-  "#..h...=.........................#######",
+  "#...l..=....g...............g.b..#######",
+  "#......=..u.5...........w.......h#######",
+  "#X..h......f..k.....a..a.....e...#######",
+  "#X..B........l......u.....l......#######",
+  "#X.w...=.........................#######",
+  "#....b.=.......c............m....#######",
+  "#.7....=..s.....c...g...b.....s..#######",
+  "#..h...=.b.....a...........k.....#######",
   "#......=.......................h.#######",
   "########################################",
 ];
 
 const WALL_CHARS = { "#": 1, "%": 2, "=": 3, "&": 4 };
+const ENEMY_CHARS = {
+  g: "groomp", s: "spitter", B: "boss", w: "wraith", c: "skitter",
+  u: "brute", e: "watcher", o: "hollow", m: "maw", f: "husk", q: "shrieker",
+};
 const EXIT_CELL = 9;
 
 let MW = 0, MH = MAP_STR.length;
 for (const r of MAP_STR) MW = Math.max(MW, r.length);
 const grid = new Uint8Array(MW * MH);
-const startSpawns = { player: { x: 2.5, y: 2.5 }, enemies: [], pickups: [] };
+const startSpawns = {
+  player: { x: 2.5, y: 2.5 },
+  enemies: [], pickups: [], barrels: [], lamps: [], skulls: [], weapons: [],
+};
 
 for (let y = 0; y < MH; y++) {
   const row = MAP_STR[y];
@@ -67,12 +76,60 @@ for (let y = 0; y < MH; y++) {
     grid[y * MW + x] = 0;
     const sx = x + 0.5, sy = y + 0.5;
     if (ch === "P") startSpawns.player = { x: sx, y: sy };
-    else if (ch === "g") startSpawns.enemies.push({ x: sx, y: sy, type: "groomp" });
-    else if (ch === "s") startSpawns.enemies.push({ x: sx, y: sy, type: "spitter" });
-    else if (ch === "B") startSpawns.enemies.push({ x: sx, y: sy, type: "boss" });
+    else if (ENEMY_CHARS[ch]) startSpawns.enemies.push({ x: sx, y: sy, type: ENEMY_CHARS[ch] });
+    else if (ch >= "3" && ch <= "7") startSpawns.weapons.push({ x: sx, y: sy, slot: +ch });
     else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
     else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
+    else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
+    else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
+    else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
   }
+}
+
+// ------------------------------------------------------------- lighting
+// Static per-cell light (sector feel): random variance, bright pools under
+// lamps and around the exit. A few cells flicker; lightNow is the per-frame
+// effective value.
+
+const lightGrid = new Float32Array(MW * MH);
+const flickerGrid = new Uint8Array(MW * MH);
+{
+  let s = 0xBADA55;
+  const rr = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < lightGrid.length; i++) {
+    lightGrid[i] = 0.68 + rr() * 0.3;
+    if (rr() < 0.05) flickerGrid[i] = 1 + (rr() * 6 | 0);
+  }
+  const boost = (cx, cy, amt) => {
+    for (let y = cy - 1; y <= cy + 1; y++) {
+      for (let x = cx - 1; x <= cx + 1; x++) {
+        if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
+        const i = y * MW + x;
+        const a = (x === cx && y === cy) ? amt : amt * 0.55;
+        lightGrid[i] = Math.min(1.35, lightGrid[i] + a);
+      }
+    }
+  };
+  for (const L of startSpawns.lamps) {
+    boost(Math.floor(L.x), Math.floor(L.y), 0.5);
+    if (rr() < 0.5) flickerGrid[Math.floor(L.y) * MW + Math.floor(L.x)] = 1 + (rr() * 6 | 0);
+  }
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === EXIT_CELL) boost(i % MW, (i / MW) | 0, 0.45);
+  }
+}
+const lightNow = new Float32Array(MW * MH);
+function updateLights() {
+  for (let i = 0; i < lightNow.length; i++) {
+    const fl = flickerGrid[i];
+    lightNow[i] = fl
+      ? lightGrid[i] * (0.72 + 0.3 * (0.5 + 0.5 * Math.sin(now * 9 + fl * 1.7)))
+      : lightGrid[i];
+  }
+}
+function lightAt(cx, cy) {
+  if (cx < 0 || cy < 0 || cx >= MW || cy >= MH) return 0.8;
+  return lightNow[cy * MW + cx];
 }
 
 function cellAt(cx, cy) {
@@ -81,10 +138,17 @@ function cellAt(cx, cy) {
 }
 function isWall(c) { return c >= 1 && c <= 4; }
 function blockedAt(x, y, r) {
-  return isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
-      || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
-      || isWall(cellAt(Math.floor(x - r), Math.floor(y + r)))
-      || isWall(cellAt(Math.floor(x + r), Math.floor(y + r)));
+  if (isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
+   || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
+   || isWall(cellAt(Math.floor(x - r), Math.floor(y + r)))
+   || isWall(cellAt(Math.floor(x + r), Math.floor(y + r)))) return true;
+  for (let i = 0; i < barrels.length; i++) {
+    const b = barrels[i];
+    if (!b.alive) continue;
+    const dx = x - b.x, dy = y - b.y, rr = r + 0.3;
+    if (dx * dx + dy * dy < rr * rr) return true;
+  }
+  return false;
 }
 function tryMove(ent, dx, dy, r) {
   if (!blockedAt(ent.x + dx, ent.y, r)) ent.x += dx;
@@ -104,16 +168,41 @@ function los(x0, y0, x1, y1) {
 // ---------------------------------------------------------------- state
 
 const ENEMY_STATS = {
-  groomp:  { hp: 60,  speed: 2.3, scale: 1.0,  r: 0.32, melee: 12, spit: 0,  ranged: false },
-  spitter: { hp: 42,  speed: 1.7, scale: 0.92, r: 0.30, melee: 0,  spit: 9,  ranged: true },
-  boss:    { hp: 320, speed: 1.5, scale: 1.55, r: 0.45, melee: 22, spit: 14, ranged: true },
+  groomp:   { hp: 60,  speed: 2.3, scale: 1.0,  r: 0.32, melee: 12, spit: 0,  ranged: false },
+  spitter:  { hp: 42,  speed: 1.7, scale: 0.92, r: 0.30, melee: 0,  spit: 9,  ranged: true, proj: "spit" },
+  boss:     { hp: 550, speed: 1.6, scale: 1.55, r: 0.45, melee: 24, spit: 16, ranged: true, proj: "spit" },
+  wraith:   { hp: 55,  speed: 3.1, scale: 0.95, r: 0.30, melee: 14, spit: 0,  ranged: false, hover: true },
+  skitter:  { hp: 18,  speed: 4.2, scale: 0.55, r: 0.22, melee: 6,  spit: 0,  ranged: false },
+  brute:    { hp: 220, speed: 1.2, scale: 1.45, r: 0.42, melee: 28, spit: 0,  ranged: false },
+  watcher:  { hp: 70,  speed: 1.9, scale: 0.80, r: 0.28, melee: 0,  spit: 12, ranged: true, proj: "spit", hover: true },
+  hollow:   { hp: 80,  speed: 2.6, scale: 1.05, r: 0.30, melee: 16, spit: 0,  ranged: false },
+  maw:      { hp: 130, speed: 2.9, scale: 1.10, r: 0.36, melee: 24, spit: 0,  ranged: false },
+  husk:     { hp: 60,  speed: 2.0, scale: 1.0,  r: 0.30, melee: 0,  spit: 13, ranged: true, proj: "fire" },
+  shrieker: { hp: 45,  speed: 2.4, scale: 1.0,  r: 0.30, melee: 10, spit: 0,  ranged: false, scream: true },
 };
 
-const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, ammo: 24, r: 0.25 };
+const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, r: 0.25 };
 let dirX = 1, dirY = 0, planeX = 0, planeY = FOV;
 
+// the arsenal: slots 1-7, switched with the number keys
+const WEAPONS = {
+  1: { name: "MALLET",   rate: 0.45, melee: { range: 1.5, dmg: 55 } },
+  2: { name: "BLASTER",  rate: 0.32, pellets: 1, spread: 0,     dmg: 30, dmgVar: 12 },
+  3: { name: "SHOTGUN",  rate: 0.95, pellets: 7, spread: 0.10,  dmg: 9,  dmgVar: 6, ammo: "shells", use: 1 },
+  4: { name: "CHAINGUN", rate: 0.09, pellets: 1, spread: 0.035, dmg: 11, dmgVar: 8, ammo: "bullets", use: 1 },
+  5: { name: "ROCKETS",  rate: 0.85, proj: { kind: "rocket", speed: 9,   dmg: 30,  blast: { r: 2.0, dmg: 110 } }, ammo: "rockets", use: 1 },
+  6: { name: "PLASMA",   rate: 0.13, proj: { kind: "plasma", speed: 12,  dmg: 24 }, ammo: "cells", use: 1 },
+  7: { name: "GBFG",     rate: 1.6,  proj: { kind: "gbfg",   speed: 6.5, dmg: 130, blast: { r: 3.4, dmg: 360 } }, ammo: "cells", use: 40 },
+};
+const AMMO_MAX = { bullets: 200, shells: 50, rockets: 25, cells: 150 };
+let ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
+let owned = {};
+let curGun = 2;
+let swingT = 0;
+
 let state = "title"; // title | playing | dead | won
-let enemies = [], pickups = [], projectiles = [];
+let enemies = [], pickups = [], projectiles = [], wpickups = [];
+let barrels = [], explosions = [], particles = [];
 let totalEnemies = 0, kills = 0;
 let startTime = 0, winTime = 0, now = 0;
 let shootCool = 0, muzzle = 0, recoil = 0, bobPhase = 0, bobAmt = 0;
@@ -128,18 +217,26 @@ function reset() {
   player.y = startSpawns.player.y;
   player.ang = 0;
   player.hp = 100;
-  player.ammo = 24;
+  ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
+  owned = { 1: true, 2: true };
+  curGun = 2;
+  swingT = 0;
   enemies = startSpawns.enemies.map(s => {
     const st = ENEMY_STATS[s.type];
     return {
       type: s.type, x: s.x, y: s.y, hp: st.hp, speed: st.speed, scale: st.scale,
       r: st.r, melee: st.melee, spit: st.spit, ranged: st.ranged,
+      proj: st.proj, hover: st.hover, scream: st.scream,
       state: "idle", animT: Math.random() * 9, cool: 0, atkT: 0, painT: 0,
       deadT: 0, rangedAttack: false,
     };
   });
   pickups = startSpawns.pickups.map(p => ({ ...p }));
+  wpickups = startSpawns.weapons.map(p => ({ ...p }));
   projectiles = [];
+  barrels = startSpawns.barrels.map(b => ({ ...b, hp: 25, alive: true, fuse: -1 }));
+  explosions = [];
+  particles = [];
   totalEnemies = enemies.length;
   kills = 0;
   shootCool = muzzle = recoil = damageFlash = pickupFlash = msgT = 0;
@@ -157,6 +254,23 @@ addEventListener("keydown", e => {
   if (e.code === "KeyM") showMap = !showMap;
   if (e.code === "KeyN" && typeof Sfx !== "undefined") flash(Sfx.toggleMusic() ? "Music on." : "Music off.");
   if (e.code === "KeyR" && state !== "title") { reset(); state = "playing"; }
+  if (e.code.startsWith("Digit")) {
+    const slot = +e.code.slice(5);
+    if (slot >= 1 && slot <= 7 && owned[slot] && slot !== curGun && state === "playing") {
+      curGun = slot;
+      muzzle = 0;
+      shootCool = Math.max(shootCool, 0.18);
+    }
+  }
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (state !== "playing") return;
+  const d = e.deltaY > 0 ? 1 : -1;
+  for (let i = 1; i <= 7; i++) {
+    const slot = ((curGun - 1 + d * i) % 7 + 7) % 7 + 1;
+    if (owned[slot]) { curGun = slot; shootCool = Math.max(shootCool, 0.18); break; }
+  }
 });
 addEventListener("keyup", e => { keys[e.code] = false; });
 
@@ -175,10 +289,18 @@ canvas.addEventListener("mousedown", e => {
   mouseDown = true;
 });
 addEventListener("mouseup", () => { mouseDown = false; });
+
+// Chrome can report a huge bogus movementX on the first event after pointer
+// lock engages — drop that event and clamp outliers.
+let justLocked = false;
+document.addEventListener("pointerlockchange", () => {
+  if (document.pointerLockElement === canvas) justLocked = true;
+});
 addEventListener("mousemove", e => {
-  if (state === "playing" && document.pointerLockElement === canvas) {
-    player.ang += e.movementX * 0.0024;
-  }
+  if (state !== "playing" || document.pointerLockElement !== canvas) return;
+  if (justLocked) { justLocked = false; return; }
+  const mx = Math.max(-80, Math.min(80, e.movementX));
+  player.ang += mx * 0.0024;
 });
 
 // --------------------------------------------------------------- combat
@@ -197,8 +319,45 @@ function damagePlayer(d) {
   }
 }
 
+function spawnParticles(x, y, u, kind, n, spd) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.283, v = (0.3 + Math.random()) * spd;
+    particles.push({
+      x, y, u: u + Math.random() * 0.25,
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v, vu: 0.4 + Math.random() * 1.4,
+      t: 0.45 + Math.random() * 0.35, kind,
+    });
+  }
+}
+
+function explodeAt(x, y, r, dmgMax, scale = 1.25) {
+  explosions.push({ x, y, t: 0, scale });
+  spawnParticles(x, y, 0.3, "spark", 10 + r * 4 | 0, 1.6 + r * 0.5);
+  Sfx.boom();
+  const pd = Math.hypot(player.x - x, player.y - y);
+  if (pd < r) damagePlayer(Math.max(1, Math.round(dmgMax * 0.4 * (1 - pd / (r + 0.4)))));
+  for (const e of enemies) {
+    if (e.state === "dead") continue;
+    const d = Math.hypot(e.x - x, e.y - y);
+    if (d < r + 0.4) damageEnemy(e, Math.max(1, Math.round(dmgMax * (1 - d / (r + 0.8)))));
+  }
+  for (const b2 of barrels) {
+    if (b2.alive && b2.fuse < 0 && Math.hypot(b2.x - x, b2.y - y) < r * 0.95) {
+      b2.fuse = 0.12 + Math.random() * 0.15;
+    }
+  }
+}
+
+function explodeBarrel(b) {
+  if (!b.alive) return;
+  b.alive = false;
+  spawnParticles(b.x, b.y, 0.2, "goo", 8, 1.8);
+  explodeAt(b.x, b.y, 2.2, 95);
+}
+
 function damageEnemy(e, dmg) {
   e.hp -= dmg;
+  spawnParticles(e.x, e.y, 0.35, "blood", 7, 1.6);
   if (e.state === "idle") { e.state = "chase"; Sfx.growl(); }
   if (e.hp <= 0) {
     e.state = "dead";
@@ -216,43 +375,99 @@ function damageEnemy(e, dmg) {
   }
 }
 
+function hitBarrel(b, dmg) {
+  b.hp -= dmg;
+  spawnParticles(b.x, b.y, 0.4, "spark", 4, 1.4);
+  if (b.hp <= 0) explodeBarrel(b);
+}
+
+// one hitscan ray, rotated `off` radians from the view direction
+function hitscanPellet(off, dmg) {
+  const ca = Math.cos(off), sa = Math.sin(off);
+  const rdx = dirX * ca - dirY * sa;
+  const rdy = dirX * sa + dirY * ca;
+  let best = null, bestD = Infinity, bestEnemy = false;
+  const consider = (x, y, width, obj, isEnemy) => {
+    const relX = x - player.x, relY = y - player.y;
+    const depth = relX * rdx + relY * rdy;
+    if (depth < 0.2 || depth >= bestD) return;
+    if (Math.abs(relX * rdy - relY * rdx) > width) return; // perp distance to ray
+    if (!los(player.x, player.y, x, y)) return;
+    best = obj;
+    bestD = depth;
+    bestEnemy = isEnemy;
+  };
+  for (const e of enemies) {
+    if (e.state !== "dead") consider(e.x, e.y, 0.34 * e.scale, e, true);
+  }
+  for (const b of barrels) {
+    if (b.alive) consider(b.x, b.y, 0.3, b, false);
+  }
+  if (!best) return;
+  if (bestEnemy) damageEnemy(best, dmg);
+  else hitBarrel(best, dmg);
+}
+
+function meleeSwing(range, dmg) {
+  Sfx.swing();
+  swingT = 0.28;
+  let best = null, bestD = Infinity, bestEnemy = false;
+  const consider = (x, y, obj, isEnemy) => {
+    const relX = x - player.x, relY = y - player.y;
+    const depth = relX * dirX + relY * dirY;
+    if (depth < 0 || depth > range || depth >= bestD) return;
+    if (Math.abs(relX * dirY - relY * dirX) > 0.7) return;
+    best = obj;
+    bestD = depth;
+    bestEnemy = isEnemy;
+  };
+  for (const e of enemies) {
+    if (e.state !== "dead") consider(e.x, e.y, e, true);
+  }
+  for (const b of barrels) {
+    if (b.alive) consider(b.x, b.y, b, false);
+  }
+  if (!best) return;
+  Sfx.thunk();
+  if (bestEnemy) damageEnemy(best, dmg + (Math.random() * 15 | 0));
+  else hitBarrel(best, dmg);
+}
+
 function tryShoot() {
   if (shootCool > 0) return;
-  if (player.ammo <= 0) { Sfx.empty(); shootCool = 0.3; return; }
-  player.ammo--;
-  shootCool = 0.32;
-  muzzle = 0.08;
+  const Wp = WEAPONS[curGun];
+  if (Wp.ammo && ammoPool[Wp.ammo] < Wp.use) { Sfx.empty(); shootCool = 0.3; return; }
+  shootCool = Wp.rate;
   recoil = 1;
-  Sfx.shoot();
+  if (Wp.melee) { meleeSwing(Wp.melee.range, Wp.melee.dmg); return; }
+  if (Wp.ammo) ammoPool[Wp.ammo] -= Wp.use;
+  muzzle = 0.07;
+  Sfx.fire(curGun);
   // gunfire wakes anything close enough to hear it
   for (const e of enemies) {
-    if (e.state === "idle" && Math.hypot(e.x - player.x, e.y - player.y) < 8) e.state = "chase";
+    if (e.state === "idle" && Math.hypot(e.x - player.x, e.y - player.y) < 9) e.state = "chase";
   }
-  // hitscan: nearest live enemy whose billboard covers screen centre
-  let best = null, bestT = Infinity;
-  for (const e of enemies) {
-    if (e.state === "dead") continue;
-    const relX = e.x - player.x, relY = e.y - player.y;
-    const invDet = 1 / (planeX * dirY - dirX * planeY);
-    const tx = invDet * (dirY * relX - dirX * relY);
-    const ty = invDet * (-planeY * relX + planeX * relY);
-    if (ty < 0.15 || ty >= bestT) continue;
-    const screenX = (W / 2) * (1 + tx / ty);
-    const halfW = (H / ty) * e.scale * 0.3;
-    if (Math.abs(screenX - W / 2) > halfW) continue;
-    if (!los(player.x, player.y, e.x, e.y)) continue;
-    best = e;
-    bestT = ty;
+  if (Wp.proj) {
+    projectiles.push({
+      x: player.x + dirX * 0.5, y: player.y + dirY * 0.5,
+      dx: dirX * Wp.proj.speed, dy: dirY * Wp.proj.speed,
+      dmg: Wp.proj.dmg, kind: Wp.proj.kind, blast: Wp.proj.blast, hostile: false,
+    });
+    return;
   }
-  if (best) damageEnemy(best, 30 + (Math.random() * 12 | 0));
+  for (let i = 0; i < Wp.pellets; i++) {
+    hitscanPellet((Math.random() - 0.5) * 2 * Wp.spread, Wp.dmg + (Math.random() * Wp.dmgVar | 0));
+  }
 }
 
 function spawnSpit(e) {
   const dx = player.x - e.x, dy = player.y - e.y;
   const d = Math.hypot(dx, dy) || 1;
+  const speed = e.proj === "fire" ? 4.6 : 5.2;
   projectiles.push({
     x: e.x + (dx / d) * 0.5, y: e.y + (dy / d) * 0.5,
-    dx: (dx / d) * 5.2, dy: (dy / d) * 5.2, dmg: e.spit,
+    dx: (dx / d) * speed, dy: (dy / d) * speed,
+    dmg: e.spit, kind: e.proj || "spit", hostile: true,
   });
   Sfx.spit();
 }
@@ -267,7 +482,18 @@ function updateEnemy(e, dt) {
   e.cool -= dt;
 
   if (e.state === "idle") {
-    if (seen && dist < 10) { e.state = "chase"; Sfx.growl(); }
+    if (seen && dist < 10) {
+      e.state = "chase";
+      if (e.scream) {
+        // the shriek wakes everything nearby
+        Sfx.scream();
+        for (const o of enemies) {
+          if (o.state === "idle" && Math.hypot(o.x - e.x, o.y - e.y) < 11) o.state = "chase";
+        }
+      } else {
+        Sfx.growl();
+      }
+    }
     return;
   }
   if (e.state === "pain") {
@@ -334,6 +560,7 @@ function update(dt) {
 
   shootCool = Math.max(0, shootCool - dt);
   muzzle = Math.max(0, muzzle - dt);
+  swingT = Math.max(0, swingT - dt);
   recoil = Math.max(0, recoil - dt * 6);
   damageFlash = Math.max(0, damageFlash - dt * 1.6);
   pickupFlash = Math.max(0, pickupFlash - dt * 3);
@@ -372,16 +599,60 @@ function update(dt) {
   for (const e of enemies) updateEnemy(e, dt);
   separateEnemies();
 
+  for (const b of barrels) {
+    if (b.alive && b.fuse >= 0) {
+      b.fuse -= dt;
+      if (b.fuse <= 0) explodeBarrel(b);
+    }
+  }
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].t += dt;
+    if (explosions[i].t > 0.45) explosions.splice(i, 1);
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t -= dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.u += p.vu * dt;
+    p.vu -= 5 * dt;
+    if (p.u < 0) { p.u = 0; p.vu *= -0.35; p.vx *= 0.5; p.vy *= 0.5; }
+    if (p.t <= 0 || isWall(cellAt(Math.floor(p.x), Math.floor(p.y)))) particles.splice(i, 1);
+  }
+
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     p.x += p.dx * dt;
     p.y += p.dy * dt;
-    if (isWall(cellAt(Math.floor(p.x), Math.floor(p.y)))) {
-      projectiles.splice(i, 1);
-      continue;
+    let hit = isWall(cellAt(Math.floor(p.x), Math.floor(p.y)));
+    if (!hit) {
+      if (p.hostile) {
+        if (Math.hypot(p.x - player.x, p.y - player.y) < 0.4) {
+          damagePlayer(p.dmg);
+          hit = true;
+        }
+      } else {
+        for (const e of enemies) {
+          if (e.state === "dead") continue;
+          if (Math.hypot(p.x - e.x, p.y - e.y) < e.r + 0.25) {
+            damageEnemy(e, p.dmg);
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) {
+          for (const b of barrels) {
+            if (b.alive && Math.hypot(p.x - b.x, p.y - b.y) < 0.5) {
+              hitBarrel(b, p.dmg);
+              hit = true;
+              break;
+            }
+          }
+        }
+      }
     }
-    if (Math.hypot(p.x - player.x, p.y - player.y) < 0.4) {
-      damagePlayer(p.dmg);
+    if (hit) {
+      if (p.blast) explodeAt(p.x, p.y, p.blast.r, p.blast.dmg, p.kind === "gbfg" ? 2.4 : 1.25);
       projectiles.splice(i, 1);
     }
   }
@@ -394,12 +665,28 @@ function update(dt) {
       player.hp = Math.min(100, player.hp + 25);
       flash("Picked up a medkit.");
     } else {
-      if (player.ammo >= 99) continue;
-      player.ammo = Math.min(99, player.ammo + 10);
-      flash("Picked up a clip of groomp-stoppers.");
+      ammoPool.bullets = Math.min(AMMO_MAX.bullets, ammoPool.bullets + 20);
+      ammoPool.shells = Math.min(AMMO_MAX.shells, ammoPool.shells + 4);
+      ammoPool.rockets = Math.min(AMMO_MAX.rockets, ammoPool.rockets + 1);
+      ammoPool.cells = Math.min(AMMO_MAX.cells, ammoPool.cells + 20);
+      flash("Picked up an ammo cache.");
     }
     pickups.splice(i, 1);
     pickupFlash = 0.5;
+    Sfx.pickup();
+  }
+
+  const WEAPON_GRANT = { 3: ["shells", 10], 4: ["bullets", 60], 5: ["rockets", 6], 6: ["cells", 50], 7: ["cells", 40] };
+  for (let i = wpickups.length - 1; i >= 0; i--) {
+    const p = wpickups[i];
+    if (Math.hypot(p.x - player.x, p.y - player.y) > 0.7) continue;
+    owned[p.slot] = true;
+    const [type, amt] = WEAPON_GRANT[p.slot];
+    ammoPool[type] = Math.min(AMMO_MAX[type], ammoPool[type] + amt);
+    curGun = p.slot;
+    flash(`You got the ${WEAPONS[p.slot].name}!`);
+    wpickups.splice(i, 1);
+    pickupFlash = 0.6;
     Sfx.pickup();
   }
 
@@ -440,6 +727,7 @@ function buildLit(tex) {
   return out;
 }
 const LIT_WALLS = WALL_TEX.map(t => (t ? buildLit(t) : null));
+const LIT_WALLS_B = WALL_TEX_B.map(t => (t ? buildLit(t) : null));
 const LIT_FLOOR = buildLit(texFloor);
 const LIT_CEIL = buildLit(texCeil);
 const LIT_EXIT = buildLit(texExitFloor);
@@ -461,24 +749,34 @@ function renderFloors() {
     let fx = px + rowDist * rx0;
     let fy = py + rowDist * ry0;
     const f = fog(rowDist) * 0.95;
-    const floorTex = LIT_FLOOR[litIndex(f)];
-    const ceilTex = LIT_CEIL[litIndex(f * 0.8)];
+    let floorTex = LIT_FLOOR[litIndex(f)];
+    let ceilTex = LIT_CEIL[litIndex(f * 0.72)];
     const exitTex = LIT_EXIT[litIndex(Math.min(1, f + 0.5) * exitPulse)];
     const rowF = y * W;
     const rowC = (H - y - 1) * W;
     let lcx = -1e9, lcy = -1e9, exit = false;
-    for (let x = 0; x < W; x++) {
+    // sample every other column and write pixel pairs: at this resolution
+    // the difference is invisible and it halves the cost of the hot loop
+    const stepX2 = stepX * 2, stepY2 = stepY * 2;
+    for (let x = 0; x < W; x += 2) {
       const cx = fx | 0, cy = fy | 0;
       if (cx !== lcx || cy !== lcy) {
         lcx = cx;
         lcy = cy;
         exit = cellAt(cx, cy) === EXIT_CELL;
+        const lv = lightAt(cx, cy);
+        floorTex = LIT_FLOOR[litIndex(f * lv)];
+        ceilTex = LIT_CEIL[litIndex(f * 0.72 * lv)];
       }
       const ti = (((fy - cy) * TEXN) | 0) * TEXN + (((fx - cx) * TEXN) | 0);
-      buf[rowF + x] = (exit ? exitTex : floorTex)[ti];
-      buf[rowC + x] = ceilTex[ti];
-      fx += stepX;
-      fy += stepY;
+      const pf = (exit ? exitTex : floorTex)[ti];
+      const pc = ceilTex[ti];
+      buf[rowF + x] = pf;
+      buf[rowF + x + 1] = pf;
+      buf[rowC + x] = pc;
+      buf[rowC + x + 1] = pc;
+      fx += stepX2;
+      fy += stepY2;
     }
   }
 }
@@ -520,7 +818,8 @@ function renderWalls() {
     let texX = (wallX * TEXN) | 0;
     if ((side === 0 && rdx > 0) || (side === 1 && rdy < 0)) texX = TEXN - texX - 1;
 
-    const t = LIT_WALLS[tex][litIndex(fog(perp) * (side === 1 ? 0.72 : 1))];
+    const variants = ((mapX + mapY) & 1) && LIT_WALLS_B[tex] ? LIT_WALLS_B : LIT_WALLS;
+    const t = variants[tex][litIndex(fog(perp) * lightAt(mapX, mapY) * (side === 1 ? 0.72 : 1))];
     const step = TEXN / lineH;
     let texPos = (clipY0 - y0) * step;
     for (let y = clipY0; y < clipY1; y++) {
@@ -534,18 +833,36 @@ function renderWalls() {
 function enemyTexture(e) {
   const S = SPRITES[e.type];
   if (e.state === "dead") return S.dead[Math.min(2, (e.deadT * 7) | 0)];
-  if (e.state === "pain") return S.pain;
+  if (e.state === "pain") return e.painT > 0.13 ? S.flash : S.pain;
   if (e.state === "attack") return S.attack;
   if (e.state === "chase") return S.walk[((e.animT * 6) | 0) % 2];
   return S.walk[0];
 }
 
+const PART_TEX = { blood: PART_BLOOD, spark: PART_SPARK, goo: PART_GOO };
+const PROJ_TEX = { spit: SPR_SPIT, fire: SPR_FIRE, plasma: SPR_PLASMA, rocket: SPR_ROCKETP, gbfg: SPR_GBFG };
+
 function renderSprites() {
   const px = player.x, py = player.y;
   const list = [];
-  for (const e of enemies) list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u: 0 });
+  for (const e of enemies) {
+    const u = e.hover && e.state !== "dead" ? 0.08 + 0.05 * Math.sin(now * 2.6 + e.animT * 4) : 0;
+    list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u });
+  }
   for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : SPR_AMMO, scale: 0.55, u: 0 });
-  for (const p of projectiles) list.push({ x: p.x, y: p.y, tex: SPR_SPIT, scale: 0.3, u: 0.3 });
+  for (const p of wpickups) list.push({ x: p.x, y: p.y, tex: SPR_WPICK[p.slot], scale: 0.6, u: 0, glow: true });
+  for (const p of projectiles) {
+    list.push({ x: p.x, y: p.y, tex: PROJ_TEX[p.kind] || SPR_SPIT, scale: p.kind === "gbfg" ? 0.55 : 0.3, u: 0.3, glow: true });
+  }
+  for (const b of barrels) {
+    if (b.alive) list.push({ x: b.x, y: b.y, tex: SPR_BARREL, scale: 0.62, u: 0 });
+  }
+  for (const L of startSpawns.lamps) list.push({ x: L.x, y: L.y, tex: SPR_LAMP, scale: 0.42, u: 0.58, glow: true });
+  for (const k of startSpawns.skulls) list.push({ x: k.x, y: k.y, tex: SPR_SKULLS, scale: 0.34, u: 0 });
+  for (const ex of explosions) {
+    list.push({ x: ex.x, y: ex.y, tex: SPR_EXPLOSION[Math.min(2, (ex.t * 7) | 0)], scale: ex.scale || 1.25, u: 0.05, glow: true });
+  }
+  for (const p of particles) list.push({ x: p.x, y: p.y, tex: PART_TEX[p.kind], scale: 0.07, u: p.u, glow: p.kind === "spark" });
 
   const invDet = 1 / (planeX * dirY - dirX * planeY);
   for (const s of list) {
@@ -569,7 +886,8 @@ function renderSprites() {
     const cx1 = Math.min(W, x0 + size);
     const cy0 = Math.max(0, top);
     const cy1 = Math.min(H, bottom);
-    const f = fog(ty);
+    const f = s.glow ? 1 : fog(ty) * lightAt(Math.floor(s.x), Math.floor(s.y));
+    const lit = f >= 0.95; // close sprites (the big ones) skip the shade math
     const tex = s.tex;
     for (let x = cx0; x < cx1; x++) {
       if (ty >= zbuf[x]) continue;
@@ -578,7 +896,7 @@ function renderSprites() {
         const texY = (((y - top) * TEXN) / size) | 0;
         const c = tex[texY * TEXN + texX];
         if ((c >>> 24) < 128) continue;
-        buf[y * W + x] = shadePx(c, f);
+        buf[y * W + x] = lit ? c : shadePx(c, f);
       }
     }
   }
@@ -586,140 +904,275 @@ function renderSprites() {
 
 function drawWeapon() {
   if (state === "title") return;
-  const bx = Math.sin(bobPhase) * 9 * bobAmt;
-  const by = Math.abs(Math.cos(bobPhase)) * 7 * bobAmt + recoil * 22;
-  const cx = W / 2 + bx;
-  const baseY = H - HUD_H + 14 + by;
-  ctx.save();
-  ctx.translate(cx, baseY);
-  ctx.scale(1.45, 1.45);
+  const G = GUNS[curGun];
+  const green = curGun === 6 || curGun === 7;
+  const bx = Math.sin(bobPhase) * 10 * bobAmt;
+  const by = Math.abs(Math.cos(bobPhase)) * 8 * bobAmt + recoil * 26;
+  // gun sits slightly right of centre, Doom style, bottom quarter of the view
+  const GS = 0.82;
+  const gw = G.w * GS, gh = G.h * GS;
+  const gx = LW / 2 + 18 + bx - gw / 2;
+  const gy = LH - HUD_H + 34 + by - gh;
+  const mx = gx + G.mx * GS, myz = gy + G.my * GS; // muzzle point
 
   if (muzzle > 0) {
-    const r = 24 + Math.random() * 10;
-    const grad = ctx.createRadialGradient(0, -86, 2, 0, -86, r);
-    grad.addColorStop(0, "rgba(255,255,210,0.95)");
-    grad.addColorStop(0.4, "rgba(255,200,60,0.8)");
-    grad.addColorStop(1, "rgba(255,120,0,0)");
-    ctx.fillStyle = grad;
+    // outer glow behind the gun
+    const r = (curGun === 5 || curGun === 7 ? 54 : 40) + Math.random() * 14;
+    const glow = ctx.createRadialGradient(mx, myz, 3, mx, myz, r);
+    if (green) {
+      glow.addColorStop(0, "rgba(220,255,215,0.95)");
+      glow.addColorStop(0.45, "rgba(90,224,130,0.75)");
+      glow.addColorStop(1, "rgba(20,150,60,0)");
+    } else {
+      glow.addColorStop(0, "rgba(255,244,190,0.95)");
+      glow.addColorStop(0.45, "rgba(255,180,50,0.75)");
+      glow.addColorStop(1, "rgba(255,110,0,0)");
+    }
+    ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(0, -86, r, 0, 7);
+    ctx.arc(mx, myz, r, 0, 7);
     ctx.fill();
   }
 
-  // barrel
-  ctx.fillStyle = "#191c22";
-  ctx.fillRect(-9, -88, 18, 26);
-  ctx.fillStyle = "#3a4150";
-  ctx.fillRect(-6, -88, 5, 26);
-  // body
-  ctx.fillStyle = "#3c424e";
-  ctx.beginPath();
-  ctx.moveTo(-30, 4);
-  ctx.lineTo(-22, -62);
-  ctx.lineTo(22, -62);
-  ctx.lineTo(30, 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#525a6a";
-  ctx.fillRect(-22, -62, 18, 66);
-  ctx.strokeStyle = "#14161c";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-9, -88, 18, 26);
-  // energy cell
-  const pulse = 0.6 + 0.4 * Math.sin(now * 7);
-  ctx.fillStyle = `rgba(60,224,106,${pulse})`;
-  ctx.fillRect(-13, -46, 26, 9);
-  ctx.strokeStyle = "#11131a";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-13, -46, 26, 9);
-  // grip ridges
-  ctx.fillStyle = "#262b34";
-  for (let i = 0; i < 3; i++) ctx.fillRect(-26 + i * 2, -28 + i * 10, 52 - i * 4, 4);
-  ctx.restore();
+  if (curGun === 1) {
+    // mallet swings around a pivot at its base
+    const sw = swingT > 0 ? Math.sin((0.28 - swingT) / 0.28 * Math.PI) : 0;
+    ctx.save();
+    ctx.translate(gx + gw / 2 + 30, gy + gh + 20);
+    ctx.rotate(-sw * 1.25);
+    ctx.translate(-sw * 26, sw * 6);
+    ctx.drawImage(G.c, -gw / 2 - 30, -gh - 20, gw, gh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(G.c, gx, gy, gw, gh);
+  }
+
+  if (G.cell) {
+    // blaster's live energy cell pulse
+    const pulse = 0.55 + 0.45 * Math.sin(now * 7);
+    ctx.fillStyle = `rgba(60,224,106,${0.35 + pulse * 0.55})`;
+    ctx.fillRect(gx + (G.cell.x + 2) * GS, gy + (G.cell.y + 2) * GS, (G.cell.w - 4) * GS, (G.cell.h - 4) * GS);
+  }
+
+  if (muzzle > 0) {
+    // starburst core in front of the muzzle
+    ctx.save();
+    ctx.translate(mx, myz);
+    ctx.rotate(Math.random() * 6.283);
+    ctx.fillStyle = green ? "rgba(225,255,225,0.95)" : "rgba(255,250,210,0.95)";
+    for (let i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 4);
+      ctx.beginPath();
+      ctx.moveTo(-3, 0);
+      ctx.lineTo(0, -26 - Math.random() * 8);
+      ctx.lineTo(3, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 function drawFace(x, y, hpRatio) {
   const t = now;
+  const hurt = damageFlash > 0.25 && hpRatio > 0;
   ctx.save();
   ctx.translate(x, y);
-  // helmet + skin
-  ctx.fillStyle = "#3c4a32";
-  ctx.fillRect(-17, -26, 34, 14);
-  ctx.fillStyle = hpRatio > 0 ? "#d8a070" : "#9a8a78";
-  ctx.fillRect(-15, -16, 30, 36);
-  // damage grime
+
+  // shoulders + neck
+  ctx.fillStyle = "#2c3824";
+  ctx.fillRect(-21, 17, 42, 9);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(-21, 17, 42, 1.5);
+  const skin = hpRatio <= 0 ? "#9a8a78" : "#d8a070";
+  ctx.fillStyle = hpRatio <= 0 ? "#7e6f60" : "#b9854f";
+  ctx.fillRect(-5, 12, 10, 6);
+
+  // head
+  ctx.fillStyle = skin;
+  ctx.fillRect(-14, -14, 28, 30);
+  // ears
+  ctx.fillRect(-16, -4, 2, 7);
+  ctx.fillRect(14, -4, 2, 7);
+  // side + jaw shading
+  ctx.fillStyle = "rgba(60,25,10,0.22)";
+  ctx.fillRect(8, -14, 6, 30);
+  ctx.fillRect(-14, 12, 28, 4);
+
+  // helmet with visor band
+  const hm = ctx.createLinearGradient(0, -27, 0, -10);
+  hm.addColorStop(0, "#55663f");
+  hm.addColorStop(1, "#2a3520");
+  ctx.fillStyle = hm;
+  ctx.fillRect(-17, -27, 34, 14);
+  ctx.fillRect(-17, -15, 4, 7);
+  ctx.fillRect(13, -15, 4, 7);
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.fillRect(-17, -26, 34, 2);
+  ctx.fillStyle = "#1a2113";
+  ctx.fillRect(-17, -14, 34, 1.5);
+  // brow shadow under helmet rim
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.fillRect(-14, -13, 28, 3);
+
+  // damage: grime and blood by tier
   if (hpRatio < 0.7) {
-    ctx.fillStyle = "rgba(150,30,20,0.5)";
-    ctx.fillRect(-15, 6, 12, 14);
+    ctx.fillStyle = "rgba(140,28,18,0.55)";
+    ctx.fillRect(-14, 4, 10, 12);
+    ctx.fillRect(5, -2, 4, 8);
   }
-  if (hpRatio < 0.4) {
-    ctx.fillStyle = "rgba(150,30,20,0.65)";
-    ctx.fillRect(4, -10, 11, 18);
+  if (hpRatio < 0.4 && hpRatio > 0) {
+    ctx.fillStyle = "rgba(165,25,12,0.8)";
+    ctx.fillRect(-3, -13, 3, 14);  // forehead drip
+    ctx.fillRect(-2, 1, 5, 4);
+    ctx.fillRect(6, 6, 8, 10);
+    ctx.fillStyle = "rgba(120,18,8,0.6)";
+    ctx.fillRect(-14, -8, 6, 9);
   }
-  // eyes (dart around like the Doom marine)
-  const look = hpRatio <= 0 ? 0 : Math.sin(t * 0.9) * 3;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(-11, -8, 9, 6);
-  ctx.fillRect(2, -8, 9, 6);
-  ctx.fillStyle = "#222";
+
+  // eyebrows angle down as health drops
+  const angry = (1 - hpRatio) * 3.5;
+  ctx.fillStyle = "#5a3a1c";
+  ctx.save();
+  ctx.translate(-7, -9);
+  ctx.rotate(angry * 0.09);
+  ctx.fillRect(-5, 0, 10, 2.4);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(7, -9);
+  ctx.rotate(-angry * 0.09);
+  ctx.fillRect(-5, 0, 10, 2.4);
+  ctx.restore();
+
+  // eyes: dart around, blink, squeeze shut when hit
+  const blink = hpRatio > 0 && (t % 3.7) > 3.55;
   if (hpRatio <= 0) {
-    ctx.fillRect(-11, -6, 9, 2);
-    ctx.fillRect(2, -6, 9, 2);
-  } else {
-    ctx.fillRect(-9 + look, -7, 4, 5);
-    ctx.fillRect(4 + look, -7, 4, 5);
-  }
-  // mouth by health tier
-  ctx.fillStyle = "#5a2a1a";
-  if (hpRatio <= 0) ctx.fillRect(-6, 10, 12, 3);
-  else if (hpRatio > 0.7) ctx.fillRect(-7, 10, 14, 3);
-  else if (hpRatio > 0.4) ctx.fillRect(-5, 11, 10, 3);
-  else {
+    ctx.fillStyle = "#3a3530";
+    ctx.fillRect(-11, -5, 9, 2);
+    ctx.fillRect(2, -5, 9, 2);
+  } else if (hurt || blink) {
+    ctx.strokeStyle = "#3a2410";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(0, 13, 5, Math.PI, 0);
+    if (hurt) {
+      ctx.moveTo(-11, -6); ctx.lineTo(-6, -3); ctx.lineTo(-11, 0);
+      ctx.moveTo(11, -6); ctx.lineTo(6, -3); ctx.lineTo(11, 0);
+    } else {
+      ctx.moveTo(-11, -3); ctx.lineTo(-2, -3);
+      ctx.moveTo(2, -3); ctx.lineTo(11, -3);
+    }
+    ctx.stroke();
+  } else {
+    const look = Math.sin(t * 0.9) * 3;
+    ctx.fillStyle = "#f4efe6";
+    ctx.fillRect(-11, -6, 9, 6);
+    ctx.fillRect(2, -6, 9, 6);
+    ctx.fillStyle = "#1c1a18";
+    ctx.fillRect(-9 + look, -5.4, 4, 5);
+    ctx.fillRect(4 + look, -5.4, 4, 5);
+  }
+
+  // mouth by tier; gritted teeth when hurt
+  if (hpRatio <= 0) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-6, 9, 12, 2.5);
+  } else if (hurt) {
+    ctx.fillStyle = "#3a1408";
+    ctx.fillRect(-7, 7, 14, 6);
+    ctx.fillStyle = "#e8e0d0";
+    ctx.fillRect(-6, 8, 12, 1.8);
+    ctx.fillRect(-6, 10.6, 12, 1.6);
+  } else if (hpRatio > 0.7) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-7, 9, 14, 2.5);
+  } else if (hpRatio > 0.4) {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(-5, 10, 10, 2.5);
+    ctx.fillRect(-7, 8.5, 3, 2.5);
+  } else {
+    ctx.fillStyle = "#3a1408";
+    ctx.beginPath();
+    ctx.arc(0, 12, 4.5, Math.PI, 0);
     ctx.fill();
   }
   ctx.restore();
 }
 
 function drawHud() {
-  ctx.fillStyle = "#16161a";
-  ctx.fillRect(0, H - HUD_H, W, HUD_H);
-  ctx.fillStyle = "#34343c";
-  ctx.fillRect(0, H - HUD_H, W, 3);
-
-  const baseY = H - HUD_H / 2;
+  const top = LH - HUD_H;
+  ctx.drawImage(HUD_CANVAS, 0, top, LW, HUD_H);
   ctx.textAlign = "center";
 
+  // glowing LED-style number
+  const led = (txt, cx, color, size) => {
+    ctx.font = `bold ${size}px monospace`;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = color;
+    ctx.fillText(txt, cx, top + 34);
+    ctx.fillText(txt, cx, top + 34);
+    ctx.restore();
+  };
+  // engraved label
+  const label = (txt, cx) => {
+    ctx.font = "9px monospace";
+    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fillText(txt, cx, top + 51);
+    ctx.fillStyle = "rgba(190,200,215,0.45)";
+    ctx.fillText(txt, cx, top + 52);
+  };
+  // slotted meter bar
+  const meter = (cx, frac, color) => {
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(cx - 44, top + 39, 88, 4);
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - 43, top + 40, 86 * Math.max(0, Math.min(1, frac)), 2);
+  };
+
+  const P = HUD_PANELS;
   const hpCol = player.hp > 60 ? "#3fe06a" : player.hp > 25 ? "#e0b03f" : "#e03f3f";
-  ctx.fillStyle = hpCol;
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${player.hp}%`, 80, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("HEALTH", 80, baseY + 24);
+  led(`${player.hp}%`, P.health.cx, hpCol, 26);
+  meter(P.health.cx, player.hp / 100, hpCol);
+  label("HEALTH", P.health.cx);
 
-  ctx.fillStyle = "#e0c63f";
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${player.ammo}`, 210, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("AMMO", 210, baseY + 24);
+  const Wp = WEAPONS[curGun];
+  if (Wp.ammo) {
+    const val = ammoPool[Wp.ammo];
+    const amCol = val >= Wp.use * 8 ? "#e0c63f" : "#e03f3f";
+    led(`${val}`, P.ammo.cx, amCol, 26);
+    meter(P.ammo.cx, val / AMMO_MAX[Wp.ammo], amCol);
+  } else {
+    led("∞", P.ammo.cx, "#e0c63f", 26);
+    meter(P.ammo.cx, 1, "#e0c63f");
+  }
+  label(Wp.name, P.ammo.cx);
 
-  drawFace(W / 2, baseY, player.hp / 100);
+  drawFace(P.face.cx, top + 30, player.hp / 100);
 
-  ctx.fillStyle = "#e08f3f";
-  ctx.font = "bold 28px monospace";
-  ctx.fillText(`${kills}/${totalEnemies}`, 430, baseY + 8);
-  ctx.fillStyle = "#88888f";
-  ctx.font = "11px monospace";
-  ctx.fillText("GROOMPS", 430, baseY + 24);
+  led(`${kills}/${totalEnemies}`, P.kills.cx, "#e08f3f", 24);
+  meter(P.kills.cx, kills / totalEnemies, "#e08f3f");
+  label("GROOMPS", P.kills.cx);
 
-  ctx.fillStyle = "#55555f";
-  ctx.font = "11px monospace";
-  ctx.fillText("M map", 560, baseY - 6);
-  ctx.fillText("N music", 560, baseY + 8);
-  ctx.fillText("R restart", 560, baseY + 22);
+  // ARMS panel: weapon slots 1-7
+  for (let s = 1; s <= 7; s++) {
+    const x = P.hints.x + 7 + (s - 1) * 16.5;
+    const y = top + 16;
+    const own = owned[s], cur = s === curGun;
+    ctx.fillStyle = "#0a0c10";
+    ctx.fillRect(x, y + 1.5, 14, 14);
+    const kg = ctx.createLinearGradient(0, y, 0, y + 14);
+    kg.addColorStop(0, cur ? "#2e6a3c" : own ? "#4a505e" : "#1e2126");
+    kg.addColorStop(1, cur ? "#1a4226" : own ? "#2c313c" : "#13151a");
+    ctx.fillStyle = kg;
+    ctx.fillRect(x, y, 14, 14);
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(x, y, 14, 1.2);
+    ctx.font = "bold 9px monospace";
+    ctx.fillStyle = cur ? "#b8f0c8" : own ? "#e8d88a" : "#43464e";
+    ctx.fillText(s, x + 7, y + 10.5);
+  }
+  label("ARSENAL", P.hints.cx);
 }
 
 function drawMinimap() {
@@ -757,25 +1210,25 @@ function drawMinimap() {
 
 function drawCenteredPanel(lines) {
   ctx.fillStyle = "rgba(8,8,12,0.78)";
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, LW, LH);
   ctx.textAlign = "center";
   let y = lines.titleY || 130;
   ctx.font = "bold 76px monospace";
   ctx.fillStyle = "#5a0d08";
-  ctx.fillText(lines.title, W / 2 + 4, y + 4);
+  ctx.fillText(lines.title, LW / 2 + 4, y + 4);
   ctx.fillStyle = lines.titleColor || "#e03f2a";
-  ctx.fillText(lines.title, W / 2, y);
+  ctx.fillText(lines.title, LW / 2, y);
   ctx.font = "16px monospace";
   ctx.fillStyle = "#c9c9d0";
   y += 42;
   for (const l of lines.body) {
-    ctx.fillText(l, W / 2, y);
+    ctx.fillText(l, LW / 2, y);
     y += 24;
   }
   if (lines.prompt) {
     ctx.font = "bold 18px monospace";
     ctx.fillStyle = 0.5 + 0.5 * Math.sin(now * 4) > 0.5 ? "#e0c63f" : "#8a7a28";
-    ctx.fillText(lines.prompt, W / 2, H - 56);
+    ctx.fillText(lines.prompt, LW / 2, LH - 56);
   }
 }
 
@@ -785,21 +1238,41 @@ function fmtTime(s) {
   return `${m}:${sec < 10 ? "0" : ""}${sec}`;
 }
 
+// static vignette overlay, built once
+const VIGNETTE = (() => {
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.82);
+  gr.addColorStop(0, "rgba(0,0,0,0)");
+  gr.addColorStop(1, "rgba(0,0,0,0.45)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, W, H);
+  return c;
+})();
+
 function render() {
+  updateLights();
   renderFloors();
   renderWalls();
   renderSprites();
   ctx.putImageData(img, 0, 0);
+  ctx.drawImage(VIGNETTE, 0, 0);
+
+  // The 2D overlay is authored in 640x400 logical coordinates.
+  ctx.save();
+  ctx.scale(W / LW, H / LH);
 
   drawWeapon();
 
   if (damageFlash > 0) {
     ctx.fillStyle = `rgba(200,10,10,${Math.min(0.55, damageFlash)})`;
-    ctx.fillRect(0, 0, W, H - HUD_H);
+    ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
   if (pickupFlash > 0) {
     ctx.fillStyle = `rgba(220,200,60,${Math.min(0.25, pickupFlash)})`;
-    ctx.fillRect(0, 0, W, H - HUD_H);
+    ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
 
   if (state === "playing") {
@@ -807,10 +1280,10 @@ function render() {
     ctx.strokeStyle = "rgba(255,255,255,0.8)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 7, H / 2 - 32); ctx.lineTo(W / 2 - 2, H / 2 - 32);
-    ctx.moveTo(W / 2 + 2, H / 2 - 32); ctx.lineTo(W / 2 + 7, H / 2 - 32);
-    ctx.moveTo(W / 2, H / 2 - 39); ctx.lineTo(W / 2, H / 2 - 34);
-    ctx.moveTo(W / 2, H / 2 - 30); ctx.lineTo(W / 2, H / 2 - 25);
+    ctx.moveTo(LW / 2 - 7, LH / 2 - 32); ctx.lineTo(LW / 2 - 2, LH / 2 - 32);
+    ctx.moveTo(LW / 2 + 2, LH / 2 - 32); ctx.lineTo(LW / 2 + 7, LH / 2 - 32);
+    ctx.moveTo(LW / 2, LH / 2 - 39); ctx.lineTo(LW / 2, LH / 2 - 34);
+    ctx.moveTo(LW / 2, LH / 2 - 30); ctx.lineTo(LW / 2, LH / 2 - 25);
     ctx.stroke();
   }
 
@@ -821,7 +1294,7 @@ function render() {
     ctx.textAlign = "center";
     ctx.font = "bold 16px monospace";
     ctx.fillStyle = `rgba(230,220,180,${Math.min(1, msgT)})`;
-    ctx.fillText(msg, W / 2, 30);
+    ctx.fillText(msg, LW / 2, 30);
   }
 
   if (state === "title") {
@@ -829,11 +1302,13 @@ function render() {
       title: "GROOMP",
       titleColor: "#e03f2a",
       body: [
-        "The Groomplex is overrun. One-eyed blobs ooze in the dark.",
-        "You have a blaster, bad intentions, and no backup.",
+        "The Groomplex is overrun. Things scuttle, float and shriek",
+        "in the dark. You have a blaster, bad intentions, and no backup.",
+        "Five more guns are lost somewhere inside. Find them.",
         "",
         "WASD move · mouse / arrows turn · click / space shoot",
-        "shift run · M map · N music · R restart",
+        "1-7 / wheel switch weapon · shift run",
+        "M map · N music · R restart",
       ],
       prompt: "CLICK TO ENTER THE GROOMPLEX",
     });
@@ -861,21 +1336,36 @@ function render() {
       prompt: "CLICK TO PLAY AGAIN",
     });
   }
+
+  ctx.restore();
 }
 
 // ----------------------------------------------------------------- loop
 
 let last = performance.now();
+let frameMs = 0;
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000);
   last = t;
   now = t / 1000;
+  const t0 = performance.now();
   update(dt);
   render();
+  frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
+  window.__groompFrameMs = frameMs;
   requestAnimationFrame(frame);
 }
 
 reset();
 requestAnimationFrame(frame);
+
+if (location.hash === "#debug") {
+  window.__groomp = {
+    player,
+    get enemies() { return enemies; },
+    get state() { return state; },
+    set state(s) { state = s; },
+  };
+}
 
 })();
