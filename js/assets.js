@@ -3,7 +3,9 @@
 // drawn onto offscreen canvases at load time and read back as Uint32Array
 // pixel buffers (little-endian 0xAABBGGRR, same layout the renderer writes).
 
-const TEXN = 64;
+// Texture/sprite resolution. Art below is authored in 64px logical
+// coordinates; makePixels scales the context so TEXN can be any multiple.
+const TEXN = 128;
 
 let _seed = 0x6700A7;
 function rnd() {
@@ -16,6 +18,7 @@ function makePixels(draw) {
   c.width = TEXN;
   c.height = TEXN;
   const g = c.getContext("2d");
+  g.scale(TEXN / 64, TEXN / 64);
   draw(g);
   return new Uint32Array(g.getImageData(0, 0, TEXN, TEXN).data.buffer);
 }

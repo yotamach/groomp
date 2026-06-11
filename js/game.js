@@ -6,8 +6,9 @@
 
 (() => {
 
-const W = 640, H = 400;
-const HUD_H = 64;
+const W = 1280, H = 800;   // internal 3D render resolution
+const LW = 640, LH = 400;  // logical coordinate space for the 2D overlay
+const HUD_H = 64;          // in logical units
 const FOV = 0.66; // camera plane length (~66 degrees)
 
 const canvas = document.getElementById("screen");
@@ -175,10 +176,18 @@ canvas.addEventListener("mousedown", e => {
   mouseDown = true;
 });
 addEventListener("mouseup", () => { mouseDown = false; });
+
+// Chrome can report a huge bogus movementX on the first event after pointer
+// lock engages — drop that event and clamp outliers.
+let justLocked = false;
+document.addEventListener("pointerlockchange", () => {
+  if (document.pointerLockElement === canvas) justLocked = true;
+});
 addEventListener("mousemove", e => {
-  if (state === "playing" && document.pointerLockElement === canvas) {
-    player.ang += e.movementX * 0.0024;
-  }
+  if (state !== "playing" || document.pointerLockElement !== canvas) return;
+  if (justLocked) { justLocked = false; return; }
+  const mx = Math.max(-80, Math.min(80, e.movementX));
+  player.ang += mx * 0.0024;
 });
 
 // --------------------------------------------------------------- combat
@@ -467,7 +476,10 @@ function renderFloors() {
     const rowF = y * W;
     const rowC = (H - y - 1) * W;
     let lcx = -1e9, lcy = -1e9, exit = false;
-    for (let x = 0; x < W; x++) {
+    // sample every other column and write pixel pairs: at this resolution
+    // the difference is invisible and it halves the cost of the hot loop
+    const stepX2 = stepX * 2, stepY2 = stepY * 2;
+    for (let x = 0; x < W; x += 2) {
       const cx = fx | 0, cy = fy | 0;
       if (cx !== lcx || cy !== lcy) {
         lcx = cx;
@@ -475,10 +487,14 @@ function renderFloors() {
         exit = cellAt(cx, cy) === EXIT_CELL;
       }
       const ti = (((fy - cy) * TEXN) | 0) * TEXN + (((fx - cx) * TEXN) | 0);
-      buf[rowF + x] = (exit ? exitTex : floorTex)[ti];
-      buf[rowC + x] = ceilTex[ti];
-      fx += stepX;
-      fy += stepY;
+      const pf = (exit ? exitTex : floorTex)[ti];
+      const pc = ceilTex[ti];
+      buf[rowF + x] = pf;
+      buf[rowF + x + 1] = pf;
+      buf[rowC + x] = pc;
+      buf[rowC + x + 1] = pc;
+      fx += stepX2;
+      fy += stepY2;
     }
   }
 }
@@ -570,6 +586,7 @@ function renderSprites() {
     const cy0 = Math.max(0, top);
     const cy1 = Math.min(H, bottom);
     const f = fog(ty);
+    const lit = f >= 0.95; // close sprites (the big ones) skip the shade math
     const tex = s.tex;
     for (let x = cx0; x < cx1; x++) {
       if (ty >= zbuf[x]) continue;
@@ -578,7 +595,7 @@ function renderSprites() {
         const texY = (((y - top) * TEXN) / size) | 0;
         const c = tex[texY * TEXN + texX];
         if ((c >>> 24) < 128) continue;
-        buf[y * W + x] = shadePx(c, f);
+        buf[y * W + x] = lit ? c : shadePx(c, f);
       }
     }
   }
@@ -588,8 +605,8 @@ function drawWeapon() {
   if (state === "title") return;
   const bx = Math.sin(bobPhase) * 9 * bobAmt;
   const by = Math.abs(Math.cos(bobPhase)) * 7 * bobAmt + recoil * 22;
-  const cx = W / 2 + bx;
-  const baseY = H - HUD_H + 14 + by;
+  const cx = LW / 2 + bx;
+  const baseY = LH - HUD_H + 14 + by;
   ctx.save();
   ctx.translate(cx, baseY);
   ctx.scale(1.45, 1.45);
@@ -684,11 +701,11 @@ function drawFace(x, y, hpRatio) {
 
 function drawHud() {
   ctx.fillStyle = "#16161a";
-  ctx.fillRect(0, H - HUD_H, W, HUD_H);
+  ctx.fillRect(0, LH - HUD_H, LW, HUD_H);
   ctx.fillStyle = "#34343c";
-  ctx.fillRect(0, H - HUD_H, W, 3);
+  ctx.fillRect(0, LH - HUD_H, LW, 3);
 
-  const baseY = H - HUD_H / 2;
+  const baseY = LH - HUD_H / 2;
   ctx.textAlign = "center";
 
   const hpCol = player.hp > 60 ? "#3fe06a" : player.hp > 25 ? "#e0b03f" : "#e03f3f";
@@ -706,7 +723,7 @@ function drawHud() {
   ctx.font = "11px monospace";
   ctx.fillText("AMMO", 210, baseY + 24);
 
-  drawFace(W / 2, baseY, player.hp / 100);
+  drawFace(LW / 2, baseY, player.hp / 100);
 
   ctx.fillStyle = "#e08f3f";
   ctx.font = "bold 28px monospace";
@@ -757,25 +774,25 @@ function drawMinimap() {
 
 function drawCenteredPanel(lines) {
   ctx.fillStyle = "rgba(8,8,12,0.78)";
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, LW, LH);
   ctx.textAlign = "center";
   let y = lines.titleY || 130;
   ctx.font = "bold 76px monospace";
   ctx.fillStyle = "#5a0d08";
-  ctx.fillText(lines.title, W / 2 + 4, y + 4);
+  ctx.fillText(lines.title, LW / 2 + 4, y + 4);
   ctx.fillStyle = lines.titleColor || "#e03f2a";
-  ctx.fillText(lines.title, W / 2, y);
+  ctx.fillText(lines.title, LW / 2, y);
   ctx.font = "16px monospace";
   ctx.fillStyle = "#c9c9d0";
   y += 42;
   for (const l of lines.body) {
-    ctx.fillText(l, W / 2, y);
+    ctx.fillText(l, LW / 2, y);
     y += 24;
   }
   if (lines.prompt) {
     ctx.font = "bold 18px monospace";
     ctx.fillStyle = 0.5 + 0.5 * Math.sin(now * 4) > 0.5 ? "#e0c63f" : "#8a7a28";
-    ctx.fillText(lines.prompt, W / 2, H - 56);
+    ctx.fillText(lines.prompt, LW / 2, LH - 56);
   }
 }
 
@@ -791,15 +808,19 @@ function render() {
   renderSprites();
   ctx.putImageData(img, 0, 0);
 
+  // The 2D overlay is authored in 640x400 logical coordinates.
+  ctx.save();
+  ctx.scale(W / LW, H / LH);
+
   drawWeapon();
 
   if (damageFlash > 0) {
     ctx.fillStyle = `rgba(200,10,10,${Math.min(0.55, damageFlash)})`;
-    ctx.fillRect(0, 0, W, H - HUD_H);
+    ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
   if (pickupFlash > 0) {
     ctx.fillStyle = `rgba(220,200,60,${Math.min(0.25, pickupFlash)})`;
-    ctx.fillRect(0, 0, W, H - HUD_H);
+    ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
 
   if (state === "playing") {
@@ -807,10 +828,10 @@ function render() {
     ctx.strokeStyle = "rgba(255,255,255,0.8)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 7, H / 2 - 32); ctx.lineTo(W / 2 - 2, H / 2 - 32);
-    ctx.moveTo(W / 2 + 2, H / 2 - 32); ctx.lineTo(W / 2 + 7, H / 2 - 32);
-    ctx.moveTo(W / 2, H / 2 - 39); ctx.lineTo(W / 2, H / 2 - 34);
-    ctx.moveTo(W / 2, H / 2 - 30); ctx.lineTo(W / 2, H / 2 - 25);
+    ctx.moveTo(LW / 2 - 7, LH / 2 - 32); ctx.lineTo(LW / 2 - 2, LH / 2 - 32);
+    ctx.moveTo(LW / 2 + 2, LH / 2 - 32); ctx.lineTo(LW / 2 + 7, LH / 2 - 32);
+    ctx.moveTo(LW / 2, LH / 2 - 39); ctx.lineTo(LW / 2, LH / 2 - 34);
+    ctx.moveTo(LW / 2, LH / 2 - 30); ctx.lineTo(LW / 2, LH / 2 - 25);
     ctx.stroke();
   }
 
@@ -821,7 +842,7 @@ function render() {
     ctx.textAlign = "center";
     ctx.font = "bold 16px monospace";
     ctx.fillStyle = `rgba(230,220,180,${Math.min(1, msgT)})`;
-    ctx.fillText(msg, W / 2, 30);
+    ctx.fillText(msg, LW / 2, 30);
   }
 
   if (state === "title") {
@@ -861,21 +882,36 @@ function render() {
       prompt: "CLICK TO PLAY AGAIN",
     });
   }
+
+  ctx.restore();
 }
 
 // ----------------------------------------------------------------- loop
 
 let last = performance.now();
+let frameMs = 0;
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000);
   last = t;
   now = t / 1000;
+  const t0 = performance.now();
   update(dt);
   render();
+  frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
+  window.__groompFrameMs = frameMs;
   requestAnimationFrame(frame);
 }
 
 reset();
 requestAnimationFrame(frame);
+
+if (location.hash === "#debug") {
+  window.__groomp = {
+    player,
+    get enemies() { return enemies; },
+    get state() { return state; },
+    set state(s) { state = s; },
+  };
+}
 
 })();

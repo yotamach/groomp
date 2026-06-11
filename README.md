@@ -5,8 +5,8 @@ Groomplex is overrun with one-eyed hopping blobs — groomps — and you are the
 exterminator.
 
 No build step, no dependencies, no asset files: the renderer is a software
-raycaster drawing into a single canvas, and every texture, sprite, and sound
-is generated procedurally at load time.
+raycaster drawing pixel-by-pixel into a 1280×800 canvas, and every texture,
+sprite, and sound is generated procedurally at load time.
 
 ## Play
 
