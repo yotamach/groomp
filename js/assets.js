@@ -3,9 +3,9 @@
 // drawn onto offscreen canvases at load time and read back as Uint32Array
 // pixel buffers (little-endian 0xAABBGGRR, same layout the renderer writes).
 
-// Texture/sprite resolution. Art below is authored in 64px logical
-// coordinates; makePixels scales the context so TEXN can be any multiple.
-const TEXN = 128;
+// Texture/sprite resolution. 64px crisp pixel art, Doom-style: textures are
+// drawn with integer rects and per-pixel dithering, never smooth gradients.
+const TEXN = 64;
 
 let _seed = 0x6700A7;
 function rnd() {
@@ -64,223 +64,222 @@ function grime(g, n) {
 }
 
 // ---------------------------------------------------------------- walls
+// Crisp Doom-style pixel art: integer rects + per-pixel dithering only.
 
-function drawBrick(g, variant) {
-  g.fillStyle = "#1d100c";
-  g.fillRect(0, 0, 64, 64);
-  for (let row = 0; row < 4; row++) {
-    const off = (row % 2) * 8 - 8;
-    for (let col = 0; col < 5; col++) {
-      const x = col * 16 + off + 1, y = row * 16 + 1;
-      const r = 92 + rnd() * 40 | 0;
-      block(g, x, y, 14, 14, `rgb(${r},${34 + rnd() * 16 | 0},${26 + rnd() * 12 | 0})`);
-      pits(g, x, y, 14, 14, 5, 0.12);
-      if (rnd() < 0.3) {
-        g.strokeStyle = "rgba(15,4,4,0.65)";
-        g.lineWidth = 1;
-        g.beginPath();
-        let cx = x + 3 + rnd() * 8, cy = y;
-        g.moveTo(cx, cy);
-        for (let s = 0; s < 3; s++) {
-          cx += (rnd() - 0.5) * 7;
-          cy += 4.5;
-          g.lineTo(cx, cy);
-        }
-        g.stroke();
-      }
+function dither(g, x, y, w, h, color, density) {
+  g.fillStyle = color;
+  for (let yy = y; yy < y + h; yy++) {
+    for (let xx = x; xx < x + w; xx++) {
+      if (rnd() < density) g.fillRect(xx, yy, 1, 1);
     }
   }
-  grime(g, 8);
-  if (variant) {
-    g.fillStyle = "rgba(12,6,4,0.3)";
-    g.beginPath();
-    g.ellipse(18 + rnd() * 28, 28 + rnd() * 22, 13 + rnd() * 8, 19 + rnd() * 9, 0, 0, 7);
-    g.fill();
-  }
-  addNoise(g, 20);
 }
 
-function drawStone(g, variant) {
-  g.fillStyle = "#101214";
+// STARTAN-style grey-green panelling with support beams and rivets
+function drawPanel(g, variant) {
+  g.fillStyle = "#8e9a88";
   g.fillRect(0, 0, 64, 64);
-  for (let r = 0; r < 4; r++) {
-    let x = (r % 2) * -7;
-    while (x < 64) {
-      const w = 13 + rnd() * 13;
-      const v = 54 + rnd() * 30 | 0;
-      block(g, x + 1, r * 16 + 1, w - 2, 14, `rgb(${v - 5},${v},${v + 7})`);
-      pits(g, x + 1, r * 16 + 1, w - 2, 14, 7, 0.1);
-      x += w;
+  dither(g, 0, 0, 64, 64, "#7e8a7a", 0.35);
+  dither(g, 0, 0, 64, 64, "#9aa694", 0.2);
+  g.fillStyle = "#5a645a";
+  g.fillRect(0, 0, 64, 1);
+  g.fillStyle = "#aab6a2";
+  g.fillRect(0, 1, 64, 1);
+  g.fillStyle = "#49524a";
+  g.fillRect(0, 62, 64, 2);
+  for (const sx of [0, 58]) {
+    g.fillStyle = "#54584c";
+    g.fillRect(sx, 0, 6, 64);
+    g.fillStyle = "#6e7464";
+    g.fillRect(sx + 1, 0, 1, 64);
+    g.fillStyle = "#3a3e34";
+    g.fillRect(sx + 5, 0, 1, 64);
+    for (const ry of [5, 21, 37, 53]) {
+      g.fillStyle = "#848a76";
+      g.fillRect(sx + 2, ry, 2, 2);
+      g.fillStyle = "#2e3228";
+      g.fillRect(sx + 2, ry + 2, 2, 1);
     }
   }
-  const moss = variant ? 15 : 8;
-  for (let i = 0; i < moss; i++) {
-    g.fillStyle = `rgba(${28 + rnd() * 22 | 0},${66 + rnd() * 44 | 0},28,${0.16 + rnd() * 0.26})`;
-    g.beginPath();
-    g.ellipse(rnd() * 64, 52 - rnd() * 34, 3 + rnd() * 5, 2 + rnd() * 3.5, 0, 0, 7);
-    g.fill();
-  }
-  grime(g, 6);
-  addNoise(g, 17);
-}
-
-function drawTech(g) {
-  g.fillStyle = "#0e1015";
-  g.fillRect(0, 0, 64, 64);
-  const panel = (x, y, w, h) => {
-    const gr = g.createLinearGradient(0, y, 0, y + h);
-    gr.addColorStop(0, "#232936");
-    gr.addColorStop(1, "#161a23");
-    g.fillStyle = gr;
+  const inset = (x, y, w, h, grate) => {
+    g.fillStyle = "#49524a";
     g.fillRect(x, y, w, h);
-    g.strokeStyle = "#080a0f";
-    g.lineWidth = 1;
-    g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    // rivets
-    g.fillStyle = "#3c4456";
-    for (const [rx, ry] of [[x + 3, y + 3], [x + w - 3, y + 3], [x + 3, y + h - 3], [x + w - 3, y + h - 3]]) {
-      g.beginPath();
-      g.arc(rx, ry, 1.4, 0, 7);
-      g.fill();
+    g.fillStyle = "#343b35";
+    g.fillRect(x, y, w, 1);
+    g.fillRect(x, y, 1, h);
+    g.fillStyle = "#9aa694";
+    g.fillRect(x, y + h - 1, w, 1);
+    g.fillRect(x + w - 1, y, 1, h);
+    if (grate) {
+      g.fillStyle = "#21261f";
+      for (let yy = y + 2; yy < y + h - 2; yy += 3) g.fillRect(x + 2, yy, w - 4, 1);
+    } else {
+      dither(g, x + 1, y + 1, w - 2, h - 2, "#39413a", 0.3);
+      dither(g, x + 1, y + 1, w - 2, h - 2, "#545e54", 0.2);
     }
   };
-  panel(2, 2, 60, 22);
-  panel(2, 26, 37, 20);
-  panel(41, 26, 21, 20);
-  // vents
-  g.fillStyle = "#05070a";
-  for (let i = 0; i < 4; i++) g.fillRect(8, 8 + i * 4, 24, 2);
-  // status lights
-  for (let i = 0; i < 3; i++) {
-    g.fillStyle = i === 1 ? "#1a5a2c" : "#3fe06a";
-    g.fillRect(40 + i * 7, 10, 4, 4);
-    if (i !== 1) {
-      g.fillStyle = "rgba(63,224,106,0.25)";
-      g.fillRect(39 + i * 7, 9, 6, 6);
-    }
+  if (variant) {
+    inset(12, 6, 40, 14, true);
+    inset(12, 26, 18, 28, false);
+    inset(34, 26, 18, 28, false);
+  } else {
+    inset(10, 8, 20, 44, false);
+    inset(34, 8, 20, 44, true);
   }
-  // cabling
-  g.strokeStyle = "#2a2f3e";
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(44, 30);
-  g.bezierCurveTo(50, 36, 46, 40, 52, 44);
-  g.stroke();
-  // hazard stripe base
-  g.save();
-  g.beginPath();
-  g.rect(0, 50, 64, 12);
-  g.clip();
-  g.fillStyle = "#8f7a1e";
-  g.fillRect(0, 50, 64, 12);
-  g.fillStyle = "#15151a";
-  for (let x = -12; x < 70; x += 12) {
-    g.beginPath();
-    g.moveTo(x, 62);
-    g.lineTo(x + 6, 50);
-    g.lineTo(x + 12, 50);
-    g.lineTo(x + 6, 62);
-    g.closePath();
-    g.fill();
-  }
-  g.restore();
-  g.fillStyle = "rgba(0,0,0,0.3)";
-  g.fillRect(0, 50, 64, 2);
-  grime(g, 7);
-  addNoise(g, 11);
+  dither(g, 6, 50, 52, 13, "#39413a", 0.22);
+  dither(g, 6, 57, 52, 6, "#262b24", 0.2);
 }
 
-function drawSlime(g) {
-  g.fillStyle = "#0c1d08";
+// chunky 16x8 pixel bricks
+function drawBrickPix(g, variant) {
+  g.fillStyle = "#241710";
   g.fillRect(0, 0, 64, 64);
-  // veins
-  g.strokeStyle = "rgba(16,46,10,0.9)";
-  g.lineWidth = 2;
-  for (let i = 0; i < 5; i++) {
-    g.beginPath();
-    let x = rnd() * 64, y = 0;
-    g.moveTo(x, y);
-    while (y < 64) {
-      x += (rnd() - 0.5) * 14;
-      y += 8 + rnd() * 8;
-      g.lineTo(x, y);
-    }
-    g.stroke();
-  }
-  // glossy pustules
-  for (let i = 0; i < 24; i++) {
-    const x = rnd() * 64, y = rnd() * 64, r = 3 + rnd() * 7;
-    const gr = g.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
-    gr.addColorStop(0, "rgba(170,255,110,0.85)");
-    gr.addColorStop(0.45, `rgba(${36 + rnd() * 30 | 0},${105 + rnd() * 60 | 0},26,0.6)`);
-    gr.addColorStop(1, "rgba(8,32,6,0)");
-    g.fillStyle = gr;
-    g.beginPath();
-    g.arc(x, y, r, 0, 7);
-    g.fill();
-  }
-  // shiny drips
-  for (let i = 0; i < 7; i++) {
-    const x = 2 + rnd() * 58, l = 12 + rnd() * 42;
-    g.fillStyle = "rgba(66,175,42,0.55)";
-    g.fillRect(x, 0, 3, l);
-    g.fillStyle = "rgba(165,255,115,0.55)";
-    g.fillRect(x, 0, 1.2, l);
-    g.fillStyle = "rgba(66,175,42,0.65)";
-    g.beginPath();
-    g.arc(x + 1.5, l, 2.2, 0, 7);
-    g.fill();
-  }
-  addNoise(g, 13);
-}
-
-const texBrick = makePixels(g => drawBrick(g, false));
-const texBrickB = makePixels(g => drawBrick(g, true));
-const texStone = makePixels(g => drawStone(g, false));
-const texStoneB = makePixels(g => drawStone(g, true));
-const texTech = makePixels(drawTech);
-const texSlime = makePixels(drawSlime);
-
-const texFloor = makePixels(g => {
-  g.fillStyle = "#161412";
-  g.fillRect(0, 0, 64, 64);
-  for (let ty = 0; ty < 4; ty++) {
-    for (let tx = 0; tx < 4; tx++) {
-      const v = 38 + rnd() * 14 | 0;
-      block(g, tx * 16 + 1, ty * 16 + 1, 14, 14, `rgb(${v},${v - 3},${v - 6})`);
-      pits(g, tx * 16 + 1, ty * 16 + 1, 14, 14, 4, 0.1);
-    }
-  }
-  g.fillStyle = "rgba(6,5,4,0.18)";
-  g.beginPath();
-  g.ellipse(rnd() * 64, rnd() * 64, 13, 8, 0, 0, 7);
-  g.fill();
-  addNoise(g, 13);
-});
-
-const texCeil = makePixels(g => {
-  g.fillStyle = "#08090c";
-  g.fillRect(0, 0, 64, 64);
-  for (let ty = 0; ty < 2; ty++) {
-    for (let tx = 0; tx < 2; tx++) {
-      const x = tx * 32 + 1, y = ty * 32 + 1;
-      g.fillStyle = "#101218";
-      g.fillRect(x, y, 30, 30);
-      g.fillStyle = "rgba(255,255,255,0.05)";
-      g.fillRect(x, y, 30, 1.5);
-      g.fillStyle = "#1c2030";
-      for (const [rx, ry] of [[x + 3, y + 3], [x + 27, y + 3], [x + 3, y + 27], [x + 27, y + 27]]) {
-        g.beginPath();
-        g.arc(rx, ry, 1.3, 0, 7);
-        g.fill();
+  const shades = ["#8c3d28", "#94432c", "#7c3522", "#86402a", "#70301e"];
+  for (let row = 0; row < 8; row++) {
+    const off = (row % 2) * 8;
+    for (let col = -1; col < 4; col++) {
+      const x = col * 16 + off, y = row * 8;
+      g.fillStyle = shades[(rnd() * shades.length) | 0];
+      g.fillRect(x + 1, y + 1, 14, 6);
+      g.fillStyle = "rgba(255,225,200,0.22)";
+      g.fillRect(x + 1, y + 1, 14, 1);
+      g.fillStyle = "rgba(0,0,0,0.3)";
+      g.fillRect(x + 1, y + 6, 14, 1);
+      if (rnd() < 0.45) {
+        g.fillStyle = "#561f10";
+        g.fillRect(x + 2 + (rnd() * 11 | 0), y + 2 + (rnd() * 4 | 0), 2, 1);
       }
     }
   }
-  g.fillStyle = "rgba(4,3,3,0.4)";
-  g.beginPath();
-  g.ellipse(rnd() * 64, rnd() * 64, 16, 10, 0, 0, 7);
-  g.fill();
-  addNoise(g, 8);
+  if (variant) dither(g, 0, 28, 64, 36, "#170c06", 0.25);
+  dither(g, 0, 0, 64, 64, "#000000", 0.06);
+}
+
+// computer bank: little screens with scanline text, vents, hazard base
+function drawCompute(g) {
+  g.fillStyle = "#252b30";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#1b2024", 0.3);
+  g.fillStyle = "#14181c";
+  g.fillRect(0, 0, 64, 2);
+  g.fillRect(0, 0, 2, 64);
+  g.fillRect(62, 0, 2, 64);
+  g.fillStyle = "#3a424a";
+  g.fillRect(0, 2, 64, 1);
+  const colors = ["#3fe06a", "#e0b03f", "#3f9ae0", "#c93a2a"];
+  for (let sy = 0; sy < 2; sy++) {
+    for (let sx = 0; sx < 3; sx++) {
+      const x = 5 + sx * 19, y = 6 + sy * 16;
+      g.fillStyle = "#070a0d";
+      g.fillRect(x, y, 16, 12);
+      g.fillStyle = "#3a424a";
+      g.fillRect(x - 1, y - 1, 18, 1);
+      g.fillRect(x - 1, y - 1, 1, 14);
+      if (rnd() < 0.85) {
+        g.fillStyle = colors[(rnd() * colors.length) | 0];
+        for (let r = 0; r < 4; r++) {
+          if (rnd() < 0.75) g.fillRect(x + 2, y + 2 + r * 2, 3 + (rnd() * 10 | 0), 1);
+        }
+      }
+    }
+  }
+  // blinky status row
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = rnd() < 0.5 ? "#3fe06a" : "#1a3a22";
+    g.fillRect(6 + i * 8, 38, 3, 2);
+  }
+  g.fillStyle = "#10141a";
+  for (let i = 0; i < 2; i++) g.fillRect(40, 36 + i * 4, 18, 2);
+  // hazard stripes
+  for (let y = 50; y < 62; y++) {
+    for (let x = 2; x < 62; x++) {
+      g.fillStyle = (((x + y) >> 2) & 1) ? "#9c8420" : "#15151a";
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  g.fillStyle = "#0c0f12";
+  g.fillRect(0, 62, 64, 2);
+}
+
+function drawSlimePix(g) {
+  g.fillStyle = "#1c3014";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#142408", 0.4);
+  dither(g, 0, 0, 64, 64, "#2c4a1c", 0.3);
+  for (let i = 0; i < 6; i++) {
+    let x = (rnd() * 64) | 0;
+    g.fillStyle = "#0e1c06";
+    for (let y = 0; y < 64; y += 2) {
+      x += (rnd() * 5 | 0) - 2;
+      g.fillRect(((x % 64) + 64) % 64, y, 2, 3);
+    }
+  }
+  for (let i = 0; i < 26; i++) {
+    const x = (rnd() * 60) | 0, y = (rnd() * 60) | 0;
+    g.fillStyle = "#4a7a28";
+    g.fillRect(x, y, 3, 3);
+    g.fillStyle = "#7ab83c";
+    g.fillRect(x, y, 2, 2);
+    g.fillStyle = "#b8e87a";
+    g.fillRect(x, y, 1, 1);
+  }
+  for (let i = 0; i < 7; i++) {
+    const x = 2 + (rnd() * 58) | 0, l = 10 + (rnd() * 40) | 0;
+    g.fillStyle = "#3c641e";
+    g.fillRect(x, 0, 2, l);
+    g.fillStyle = "#8cc848";
+    g.fillRect(x, 0, 1, l);
+    g.fillRect(x, l, 2, 2);
+  }
+}
+
+const texPanel = makePixels(g => drawPanel(g, false));
+const texPanelB = makePixels(g => drawPanel(g, true));
+const texBrick = makePixels(g => drawBrickPix(g, false));
+const texBrickB = makePixels(g => drawBrickPix(g, true));
+const texTech = makePixels(drawCompute);
+const texSlime = makePixels(drawSlimePix);
+
+// chamfered grey tiles, like the classic hexagonal Doom floors
+const texFloor = makePixels(g => {
+  g.fillStyle = "#2e342e";
+  g.fillRect(0, 0, 64, 64);
+  const wRow = [6, 10, 12, 14, 14, 14, 14, 14, 14, 14, 14, 12, 10, 6];
+  for (let ty = 0; ty < 4; ty++) {
+    for (let tx = 0; tx < 4; tx++) {
+      const base = 108 + (rnd() * 26 | 0);
+      for (let r = 0; r < 14; r++) {
+        const w = wRow[r];
+        const v = base - r;
+        g.fillStyle = `rgb(${v - 8},${v},${v - 10})`;
+        g.fillRect(tx * 16 + 8 - w / 2, ty * 16 + 1 + r, w, 1);
+      }
+      g.fillStyle = "rgba(255,255,255,0.16)";
+      g.fillRect(tx * 16 + 5, ty * 16 + 1, 6, 1);
+    }
+  }
+  dither(g, 0, 0, 64, 64, "#1e231e", 0.1);
+  dither(g, 0, 0, 64, 64, "#4d564d", 0.08);
+});
+
+// light panel grid overhead
+const texCeil = makePixels(g => {
+  g.fillStyle = "#6a726a";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#5e665e", 0.35);
+  dither(g, 0, 0, 64, 64, "#788078", 0.2);
+  g.fillStyle = "#454c45";
+  for (let i = 0; i < 64; i += 16) {
+    g.fillRect(i, 0, 1, 64);
+    g.fillRect(0, i, 64, 1);
+  }
+  g.fillStyle = "#383e38";
+  for (let ty = 0; ty < 4; ty++) {
+    for (let tx = 0; tx < 4; tx++) {
+      g.fillRect(tx * 16 + 3, ty * 16 + 3, 2, 2);
+      g.fillRect(tx * 16 + 11, ty * 16 + 11, 2, 2);
+    }
+  }
 });
 
 const texExitFloor = makePixels(g => {
@@ -308,8 +307,8 @@ const texExitFloor = makePixels(g => {
   addNoise(g, 10);
 });
 
-const WALL_TEX = [null, texBrick, texStone, texTech, texSlime];
-const WALL_TEX_B = [null, texBrickB, texStoneB, null, null];
+const WALL_TEX = [null, texPanel, texBrick, texTech, texSlime];
+const WALL_TEX_B = [null, texPanelB, texBrickB, null, null];
 
 // ---------------------------------------------------------------- enemies
 // A "groomp" is a one-eyed hopping blob. Frames are drawn parametrically so
@@ -1168,6 +1167,23 @@ function orbSprite(c0, c1, c2) {
     g.fill();
   });
 }
+const SPR_ARMOR = makePixels(g => {
+  // green combat vest
+  g.fillStyle = "#16381e";
+  g.fillRect(14, 26, 6, 13);
+  g.fillRect(44, 26, 6, 13);
+  g.fillRect(18, 24, 28, 6);
+  g.fillStyle = "#1d4a26";
+  g.fillRect(20, 28, 24, 24);
+  g.fillStyle = "#2e6a3c";
+  g.fillRect(22, 30, 9, 20);
+  g.fillStyle = "#9adb86";
+  g.fillRect(22, 30, 9, 2);
+  g.fillStyle = "#0e2a14";
+  g.fillRect(30, 28, 4, 24);
+  g.fillRect(20, 48, 24, 4);
+});
+
 const SPR_SPIT = orbSprite("#ffffff", "#ff66ff", "#a316a3");
 const SPR_FIRE = orbSprite("#fff3c0", "#ff9a20", "#b03000");
 const SPR_PLASMA = orbSprite("#ffffff", "#7aff7a", "#0e8a2e");
@@ -1464,7 +1480,19 @@ function gunCanvas(w, h, draw) {
   const g = c.getContext("2d");
   g.scale(2, 2);
   draw(g);
-  return c;
+  // pixelate to chunky sprite-art, Doom style
+  const f = 5;
+  const small = document.createElement("canvas");
+  small.width = Math.ceil(c.width / f);
+  small.height = Math.ceil(c.height / f);
+  small.getContext("2d").drawImage(c, 0, 0, small.width, small.height);
+  const out = document.createElement("canvas");
+  out.width = c.width;
+  out.height = c.height;
+  const og = out.getContext("2d");
+  og.imageSmoothingEnabled = false;
+  og.drawImage(small, 0, 0, out.width, out.height);
+  return out;
 }
 
 function glove(g, x, y, rx, ry, rot, dark) {
@@ -1929,12 +1957,14 @@ const GUNS = {
 // brushed metal, bevelled edges, recessed instrument panels, screws and
 // hazard-stripe end caps. Live numbers/face are drawn over it by the game.
 
+// Classic Doom layout: AMMO | HEALTH | ARMS | face | ARMOR | ammo table
 const HUD_PANELS = {
-  health: { x: 20, y: 8, w: 120, h: 48, cx: 80 },
-  ammo:   { x: 150, y: 8, w: 120, h: 48, cx: 210 },
-  face:   { x: 291, y: 5, w: 58, h: 54, cx: 320 },
-  kills:  { x: 370, y: 8, w: 120, h: 48, cx: 430 },
-  hints:  { x: 500, y: 8, w: 126, h: 48, cx: 563 },
+  ammo:   { x: 8,   y: 8, w: 90,  h: 48, cx: 53 },
+  health: { x: 102, y: 8, w: 90,  h: 48, cx: 147 },
+  arms:   { x: 196, y: 8, w: 91,  h: 48, cx: 241 },
+  face:   { x: 291, y: 5, w: 58,  h: 54, cx: 320 },
+  armor:  { x: 353, y: 8, w: 90,  h: 48, cx: 398 },
+  table:  { x: 447, y: 8, w: 185, h: 48, cx: 539 },
 };
 
 const HUD_CANVAS = (() => {
@@ -1973,29 +2003,6 @@ const HUD_CANVAS = (() => {
   g.fillRect(0, 2, 640, 1.5);
   g.fillRect(0, 61, 640, 3);
 
-  // hazard-stripe end caps
-  for (const x0 of [0, 630]) {
-    g.save();
-    g.beginPath();
-    g.rect(x0, 3, 10, 58);
-    g.clip();
-    g.fillStyle = "#8f7a1e";
-    g.fillRect(x0, 3, 10, 58);
-    g.fillStyle = "#16161a";
-    for (let y = -10; y < 70; y += 10) {
-      g.beginPath();
-      g.moveTo(x0, y + 10);
-      g.lineTo(x0 + 10, y);
-      g.lineTo(x0 + 10, y + 5);
-      g.lineTo(x0, y + 15);
-      g.closePath();
-      g.fill();
-    }
-    g.restore();
-    g.fillStyle = "rgba(0,0,0,0.4)";
-    g.fillRect(x0 + (x0 ? -1.5 : 10), 3, 1.5, 58);
-  }
-
   // recessed instrument panels
   const inset = (x, y, w, h) => {
     g.fillStyle = "rgba(0,0,0,0.5)";
@@ -2031,12 +2038,12 @@ const HUD_CANVAS = (() => {
     g.lineTo(x + Math.cos(a) * 1.8, y + Math.sin(a) * 1.8);
     g.stroke();
   };
-  for (const x of [145, 280, 360, 494]) {
+  for (const x of [99, 194, 289, 351, 445]) {
     screw(x, 10);
     screw(x, 54);
   }
-  screw(16, 32);
-  screw(624, 32);
+  screw(3.5, 32);
+  screw(636.5, 32);
 
   return c;
 })();

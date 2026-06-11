@@ -25,20 +25,20 @@ const zbuf = new Float32Array(W);
 
 const MAP_STR = [
   "########################################",
-  "#.........#.................#..........#",
+  "#.....A...#.................#..........#",
   "#....a....#.........a.....b.#....c...h.#",
   "#..P......#....%.c...c.%....#........b.#",
   "#....l.......3.....l........#.....l....#",
   "#.........a........g.....g.....q.s..f..#",
   "#.......b.#.....o....h..k..............#",
   "#......k..#....%.......%....#....k.w...#",
-  "###########.h.......m....g..#.....a....#",
+  "###########.h.......m....g..#..A..a....#",
   "###########...e.............#.b.....s..#",
   "##################6.#########..a...4...#",
   "##################q.#########......o...#",
   "##################l.#########&&&&&&&&&&&",
   "##################..####################",
-  "#.k....=.....................a...#######",
+  "#.k....=................A....a...#######",
   "#..a...=.h......................a#######",
   "#...l..=....g...............g.b..#######",
   "#......=..u.5...........w.......h#######",
@@ -80,6 +80,7 @@ for (let y = 0; y < MH; y++) {
     else if (ch >= "3" && ch <= "7") startSpawns.weapons.push({ x: sx, y: sy, slot: +ch });
     else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
     else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
+    else if (ch === "A") startSpawns.pickups.push({ x: sx, y: sy, kind: "armor" });
     else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
     else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
     else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
@@ -97,7 +98,7 @@ const flickerGrid = new Uint8Array(MW * MH);
   let s = 0xBADA55;
   const rr = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   for (let i = 0; i < lightGrid.length; i++) {
-    lightGrid[i] = 0.68 + rr() * 0.3;
+    lightGrid[i] = 0.8 + rr() * 0.28;
     if (rr() < 0.05) flickerGrid[i] = 1 + (rr() * 6 | 0);
   }
   const boost = (cx, cy, amt) => {
@@ -106,7 +107,7 @@ const flickerGrid = new Uint8Array(MW * MH);
         if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
         const i = y * MW + x;
         const a = (x === cx && y === cy) ? amt : amt * 0.55;
-        lightGrid[i] = Math.min(1.35, lightGrid[i] + a);
+        lightGrid[i] = Math.min(1.4, lightGrid[i] + a);
       }
     }
   };
@@ -181,7 +182,7 @@ const ENEMY_STATS = {
   shrieker: { hp: 45,  speed: 2.4, scale: 1.0,  r: 0.30, melee: 10, spit: 0,  ranged: false, scream: true },
 };
 
-const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, r: 0.25 };
+const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, armor: 0, r: 0.25 };
 let dirX = 1, dirY = 0, planeX = 0, planeY = FOV;
 
 // the arsenal: slots 1-7, switched with the number keys
@@ -217,6 +218,7 @@ function reset() {
   player.y = startSpawns.player.y;
   player.ang = 0;
   player.hp = 100;
+  player.armor = 0;
   ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
   owned = { 1: true, 2: true };
   curGun = 2;
@@ -307,6 +309,10 @@ addEventListener("mousemove", e => {
 
 function damagePlayer(d) {
   if (state !== "playing") return;
+  // armor soaks a third of incoming damage until it runs out
+  const absorb = Math.min(player.armor, Math.ceil(d / 3));
+  player.armor -= absorb;
+  d -= absorb;
   player.hp -= d;
   damageFlash = Math.min(0.9, damageFlash + 0.45);
   if (player.hp <= 0) {
@@ -664,6 +670,10 @@ function update(dt) {
       if (player.hp >= 100) continue;
       player.hp = Math.min(100, player.hp + 25);
       flash("Picked up a medkit.");
+    } else if (p.kind === "armor") {
+      if (player.armor >= 100) continue;
+      player.armor = Math.min(100, player.armor + 50);
+      flash("Picked up groomp-plate armor.");
     } else {
       ammoPool.bullets = Math.min(AMMO_MAX.bullets, ammoPool.bullets + 20);
       ammoPool.shells = Math.min(AMMO_MAX.shells, ammoPool.shells + 4);
@@ -701,7 +711,7 @@ function update(dt) {
 // --------------------------------------------------------------- render
 
 function fog(d) {
-  const f = 1.3 / (0.3 + d * 0.18);
+  const f = 1.5 / (0.28 + d * 0.15);
   return f > 1 ? 1 : f;
 }
 
@@ -721,7 +731,7 @@ function buildLit(tex) {
   for (let i = 0; i < SHADES; i++) {
     const f = (i + 1) / SHADES;
     const t = new Uint32Array(TEXN * TEXN);
-    for (let j = 0; j < t.length; j++) t[j] = shadePx(tex[j], f);
+    for (let j = 0; j < t.length; j++) t[j] = (shadePx(tex[j], f) & 0xFFF8F8F8) >>> 0;
     out.push(t);
   }
   return out;
@@ -750,7 +760,7 @@ function renderFloors() {
     let fy = py + rowDist * ry0;
     const f = fog(rowDist) * 0.95;
     let floorTex = LIT_FLOOR[litIndex(f)];
-    let ceilTex = LIT_CEIL[litIndex(f * 0.72)];
+    let ceilTex = LIT_CEIL[litIndex(f * 0.85)];
     const exitTex = LIT_EXIT[litIndex(Math.min(1, f + 0.5) * exitPulse)];
     const rowF = y * W;
     const rowC = (H - y - 1) * W;
@@ -766,7 +776,7 @@ function renderFloors() {
         exit = cellAt(cx, cy) === EXIT_CELL;
         const lv = lightAt(cx, cy);
         floorTex = LIT_FLOOR[litIndex(f * lv)];
-        ceilTex = LIT_CEIL[litIndex(f * 0.72 * lv)];
+        ceilTex = LIT_CEIL[litIndex(f * 0.85 * lv)];
       }
       const ti = (((fy - cy) * TEXN) | 0) * TEXN + (((fx - cx) * TEXN) | 0);
       const pf = (exit ? exitTex : floorTex)[ti];
@@ -849,7 +859,7 @@ function renderSprites() {
     const u = e.hover && e.state !== "dead" ? 0.08 + 0.05 * Math.sin(now * 2.6 + e.animT * 4) : 0;
     list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u });
   }
-  for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : SPR_AMMO, scale: 0.55, u: 0 });
+  for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : p.kind === "armor" ? SPR_ARMOR : SPR_AMMO, scale: 0.55, u: 0 });
   for (const p of wpickups) list.push({ x: p.x, y: p.y, tex: SPR_WPICK[p.slot], scale: 0.6, u: 0, glow: true });
   for (const p of projectiles) {
     list.push({ x: p.x, y: p.y, tex: PROJ_TEX[p.kind] || SPR_SPIT, scale: p.kind === "gbfg" ? 0.55 : 0.3, u: 0.3, glow: true });
@@ -1098,22 +1108,48 @@ function drawFace(x, y, hpRatio) {
   ctx.restore();
 }
 
+// Doom-style big digit font (5x7 pixel glyphs)
+const GLYPHS = {
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00110", "01000", "10000", "11111"],
+  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+  "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"],
+  "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
+  "∞": ["0000000", "0110110", "1001001", "1001001", "0110110", "0000000", "0000000"],
+};
+
+// right-aligned Doom-style number with hard pixel shadow
+function drawNum(str, xRight, y, s, color, shadow = "#3a0c06") {
+  let w = 0;
+  for (const ch of str) w += ((GLYPHS[ch] || GLYPHS["0"])[0].length + 1) * s;
+  let x = xRight - w;
+  for (const ch of str) {
+    const gl = GLYPHS[ch] || GLYPHS["0"];
+    for (let r = 0; r < gl.length; r++) {
+      for (let c = 0; c < gl[r].length; c++) {
+        if (gl[r][c] !== "1") continue;
+        ctx.fillStyle = shadow;
+        ctx.fillRect(x + c * s + s * 0.5, y + r * s + s * 0.5, s, s);
+        ctx.fillStyle = color;
+        ctx.fillRect(x + c * s, y + r * s, s, s);
+      }
+    }
+    x += (gl[0].length + 1) * s;
+  }
+}
+
 function drawHud() {
   const top = LH - HUD_H;
   ctx.drawImage(HUD_CANVAS, 0, top, LW, HUD_H);
   ctx.textAlign = "center";
 
-  // glowing LED-style number
-  const led = (txt, cx, color, size) => {
-    ctx.font = `bold ${size}px monospace`;
-    ctx.save();
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
-    ctx.fillStyle = color;
-    ctx.fillText(txt, cx, top + 34);
-    ctx.fillText(txt, cx, top + 34);
-    ctx.restore();
-  };
   // engraved label
   const label = (txt, cx) => {
     ctx.font = "9px monospace";
@@ -1122,57 +1158,53 @@ function drawHud() {
     ctx.fillStyle = "rgba(190,200,215,0.45)";
     ctx.fillText(txt, cx, top + 52);
   };
-  // slotted meter bar
-  const meter = (cx, frac, color) => {
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(cx - 44, top + 39, 88, 4);
-    ctx.fillStyle = color;
-    ctx.fillRect(cx - 43, top + 40, 86 * Math.max(0, Math.min(1, frac)), 2);
-  };
 
   const P = HUD_PANELS;
-  const hpCol = player.hp > 60 ? "#3fe06a" : player.hp > 25 ? "#e0b03f" : "#e03f3f";
-  led(`${player.hp}%`, P.health.cx, hpCol, 26);
-  meter(P.health.cx, player.hp / 100, hpCol);
+  const RED = "#e8281c";
+  const numY = top + 13;
+
+  // AMMO (current weapon)
+  const Wp = WEAPONS[curGun];
+  if (Wp.ammo) drawNum(String(ammoPool[Wp.ammo]), P.ammo.x + P.ammo.w - 8, numY, 3, RED);
+  else drawNum("∞", P.ammo.x + P.ammo.w - 8, numY, 3, RED);
+  label("AMMO", P.ammo.cx);
+
+  // HEALTH
+  drawNum(player.hp + "%", P.health.x + P.health.w - 4, numY, 3, RED);
   label("HEALTH", P.health.cx);
 
-  const Wp = WEAPONS[curGun];
-  if (Wp.ammo) {
-    const val = ammoPool[Wp.ammo];
-    const amCol = val >= Wp.use * 8 ? "#e0c63f" : "#e03f3f";
-    led(`${val}`, P.ammo.cx, amCol, 26);
-    meter(P.ammo.cx, val / AMMO_MAX[Wp.ammo], amCol);
-  } else {
-    led("∞", P.ammo.cx, "#e0c63f", 26);
-    meter(P.ammo.cx, 1, "#e0c63f");
+  // ARMS: slots 2-7 in a 3x2 grid, Doom style
+  for (let s = 2; s <= 7; s++) {
+    const col = (s - 2) % 3, row = s >= 5 ? 1 : 0;
+    const x = P.arms.x + 16 + col * 27;
+    const y = top + 12 + row * 17;
+    const cur = s === curGun;
+    if (cur) {
+      ctx.fillStyle = "rgba(232,200,64,0.18)";
+      ctx.fillRect(x - 7, y - 2, 15, 13);
+    }
+    drawNum(String(s), x + 6, y, 1.6, owned[s] ? (cur ? "#f8ec9a" : "#e8c840") : "#3c4046", "#0c0d10");
   }
-  label(Wp.name, P.ammo.cx);
+  label("ARMS", P.arms.cx);
 
   drawFace(P.face.cx, top + 30, player.hp / 100);
 
-  led(`${kills}/${totalEnemies}`, P.kills.cx, "#e08f3f", 24);
-  meter(P.kills.cx, kills / totalEnemies, "#e08f3f");
-  label("GROOMPS", P.kills.cx);
+  // ARMOR
+  drawNum(player.armor + "%", P.armor.x + P.armor.w - 4, numY, 3, RED);
+  label("ARMOR", P.armor.cx);
 
-  // ARMS panel: weapon slots 1-7
-  for (let s = 1; s <= 7; s++) {
-    const x = P.hints.x + 7 + (s - 1) * 16.5;
-    const y = top + 16;
-    const own = owned[s], cur = s === curGun;
-    ctx.fillStyle = "#0a0c10";
-    ctx.fillRect(x, y + 1.5, 14, 14);
-    const kg = ctx.createLinearGradient(0, y, 0, y + 14);
-    kg.addColorStop(0, cur ? "#2e6a3c" : own ? "#4a505e" : "#1e2126");
-    kg.addColorStop(1, cur ? "#1a4226" : own ? "#2c313c" : "#13151a");
-    ctx.fillStyle = kg;
-    ctx.fillRect(x, y, 14, 14);
-    ctx.fillStyle = "rgba(255,255,255,0.2)";
-    ctx.fillRect(x, y, 14, 1.2);
-    ctx.font = "bold 9px monospace";
-    ctx.fillStyle = cur ? "#b8f0c8" : own ? "#e8d88a" : "#43464e";
-    ctx.fillText(s, x + 7, y + 10.5);
+  // ammo table
+  const rows = [["BULL", "bullets"], ["SHEL", "shells"], ["RCKT", "rockets"], ["CELL", "cells"]];
+  ctx.textAlign = "left";
+  for (let i = 0; i < rows.length; i++) {
+    const y = top + 11 + i * 11;
+    ctx.font = "8px monospace";
+    ctx.fillStyle = "#8a93a2";
+    ctx.fillText(rows[i][0], P.table.x + 8, y + 7);
+    drawNum(String(ammoPool[rows[i][1]]), P.table.x + 110, y, 1.1, "#e8c840", "#1a1408");
+    drawNum(String(AMMO_MAX[rows[i][1]]), P.table.x + 158, y, 1.1, "#a08820", "#1a1408");
   }
-  label("ARSENAL", P.hints.cx);
+  ctx.textAlign = "center";
 }
 
 function drawMinimap() {
@@ -1246,7 +1278,7 @@ const VIGNETTE = (() => {
   const g = c.getContext("2d");
   const gr = g.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.82);
   gr.addColorStop(0, "rgba(0,0,0,0)");
-  gr.addColorStop(1, "rgba(0,0,0,0.45)");
+  gr.addColorStop(1, "rgba(0,0,0,0.3)");
   g.fillStyle = gr;
   g.fillRect(0, 0, W, H);
   return c;
@@ -1295,6 +1327,13 @@ function render() {
     ctx.font = "bold 16px monospace";
     ctx.fillStyle = `rgba(230,220,180,${Math.min(1, msgT)})`;
     ctx.fillText(msg, LW / 2, 30);
+  }
+  if (state === "playing") {
+    ctx.textAlign = "right";
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "rgba(220,200,160,0.55)";
+    ctx.fillText(`KILLS ${kills}/${totalEnemies}`, LW - 10, 16);
+    ctx.textAlign = "center";
   }
 
   if (state === "title") {
