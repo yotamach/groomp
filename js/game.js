@@ -944,6 +944,7 @@ function drawWeapon() {
     ctx.fill();
   }
 
+  ctx.imageSmoothingEnabled = true;
   if (curGun === 1) {
     // mallet swings around a pivot at its base
     const sw = swingT > 0 ? Math.sin((0.28 - swingT) / 0.28 * Math.PI) : 0;
@@ -956,6 +957,7 @@ function drawWeapon() {
   } else {
     ctx.drawImage(G.c, gx, gy, gw, gh);
   }
+  ctx.imageSmoothingEnabled = false;
 
   if (G.cell) {
     // blaster's live energy cell pulse

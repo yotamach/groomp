@@ -1470,215 +1470,293 @@ const PART_GOO = makePixels(g => {
 });
 
 // ---------------------------------------------------------------- weapons
-// Pre-rendered first-person guns (drawn once at 2x for crispness).
-// Each entry: {c, w, h, mx, my} with the muzzle point in local coords.
+// First-person guns pre-rendered at high resolution (3x logical, 512-720px)
+// with layered cylindrical shading, specular detail, wear and real hands.
 
 function gunCanvas(w, h, draw) {
   const c = document.createElement("canvas");
-  c.width = w * 2;
-  c.height = h * 2;
+  c.width = w * 3;
+  c.height = h * 3;
   const g = c.getContext("2d");
-  g.scale(2, 2);
+  g.scale(3, 3);
   draw(g);
-  // pixelate to chunky sprite-art, Doom style
-  const f = 5;
-  const small = document.createElement("canvas");
-  small.width = Math.ceil(c.width / f);
-  small.height = Math.ceil(c.height / f);
-  small.getContext("2d").drawImage(c, 0, 0, small.width, small.height);
-  const out = document.createElement("canvas");
-  out.width = c.width;
-  out.height = c.height;
-  const og = out.getContext("2d");
-  og.imageSmoothingEnabled = false;
-  og.drawImage(small, 0, 0, out.width, out.height);
-  return out;
+  return c;
 }
 
-function glove(g, x, y, rx, ry, rot, dark) {
-  g.fillStyle = dark ? "#43301f" : "#4a3526";
-  g.beginPath();
-  g.ellipse(x, y, rx, ry, rot, 0, 7);
-  g.fill();
-  for (let i = 0; i < 3; i++) {
+// multi-stop horizontal gradient for cylindrical metal
+function cyl(g, x0, x1, tones) {
+  const gr = g.createLinearGradient(x0, 0, x1, 0);
+  for (let i = 0; i < tones.length; i++) gr.addColorStop(i / (tones.length - 1), tones[i]);
+  return gr;
+}
+
+const STEEL_T = ["#0b0d11", "#2e3540", "#5d6878", "#8f9cae", "#aebccf", "#717e90", "#2a303a", "#090b0e"];
+const BLUED_T = ["#080a0e", "#1d2330", "#3a465c", "#5d6c88", "#74849e", "#46536b", "#161b26", "#06080c"];
+const OLIVE_T = ["#15180c", "#39411f", "#59652f", "#6e7c3c", "#7d8c46", "#525e2b", "#252a13", "#101307"];
+const GUNMETAL_T = ["#0a0f0c", "#1e2a22", "#39493c", "#586b5c", "#6a7e6e", "#3c4c40", "#16201a", "#080c0a"];
+
+function wear(g, x, y, w, h, n) {
+  for (let i = 0; i < n; i++) {
+    g.strokeStyle = rnd() < 0.5
+      ? `rgba(225,235,245,${0.05 + rnd() * 0.09})`
+      : `rgba(0,0,0,${0.08 + rnd() * 0.12})`;
+    g.lineWidth = 0.5 + rnd() * 0.7;
+    const sx = x + rnd() * w, sy = y + rnd() * h;
     g.beginPath();
-    g.ellipse(x - rx * 0.5 + i * rx * 0.45, y - ry * 0.55 + i * 2, rx * 0.32, ry * 0.6, rot, 0, 7);
-    g.fill();
+    g.moveTo(sx, sy);
+    g.lineTo(sx + (rnd() - 0.5) * 14, sy + (rnd() - 0.5) * 5);
+    g.stroke();
   }
-  g.fillStyle = "rgba(255,220,180,0.13)";
-  g.beginPath();
-  g.ellipse(x - rx * 0.3, y - ry * 0.2, rx * 0.45, ry * 0.35, rot, 0, 7);
-  g.fill();
 }
 
-// cylinder-shaded vertical barrel, narrowing toward the muzzle
-function barrelShape(g, cx, topY, botY, topHalf, botHalf, hues) {
-  const grad = g.createLinearGradient(cx - botHalf, 0, cx + botHalf, 0);
-  grad.addColorStop(0, hues[0]);
-  grad.addColorStop(0.32, hues[1]);
-  grad.addColorStop(0.5, hues[2]);
-  grad.addColorStop(0.68, hues[1]);
-  grad.addColorStop(1, hues[0]);
-  g.fillStyle = grad;
+function screwHead(g, x, y, r) {
+  const gr = g.createRadialGradient(x - r * 0.4, y - r * 0.4, r * 0.1, x, y, r);
+  gr.addColorStop(0, "#aab4c2");
+  gr.addColorStop(0.6, "#566070");
+  gr.addColorStop(1, "#181c24");
+  g.fillStyle = gr;
   g.beginPath();
-  g.moveTo(cx - topHalf, topY);
-  g.lineTo(cx + topHalf, topY);
-  g.lineTo(cx + botHalf, botY);
-  g.lineTo(cx - botHalf, botY);
-  g.closePath();
+  g.arc(x, y, r, 0, 7);
   g.fill();
+  g.strokeStyle = "#0c0e12";
+  g.lineWidth = r * 0.35;
+  const a = rnd() * 3;
+  g.beginPath();
+  g.moveTo(x - Math.cos(a) * r * 0.65, y - Math.sin(a) * r * 0.65);
+  g.lineTo(x + Math.cos(a) * r * 0.65, y + Math.sin(a) * r * 0.65);
+  g.stroke();
 }
 
-const STEEL = ["#0f1116", "#444c5a", "#6a7588"];
+// realistic tactical glove gripping toward the viewer
+function tacticalHand(g, x, y, s, rot) {
+  g.save();
+  g.translate(x, y);
+  g.rotate(rot);
+  g.scale(s, s);
+  // cuff
+  const cg = g.createLinearGradient(-6, 8, 18, 24);
+  cg.addColorStop(0, "#2c2823");
+  cg.addColorStop(1, "#181512");
+  g.fillStyle = cg;
+  g.beginPath();
+  g.ellipse(8, 17, 17, 12, 0.2, 0, 7);
+  g.fill();
+  // palm
+  const pg = g.createRadialGradient(-4, -4, 2, 0, 0, 22);
+  pg.addColorStop(0, "#5d554c");
+  pg.addColorStop(0.65, "#3d362f");
+  pg.addColorStop(1, "#221d19");
+  g.fillStyle = pg;
+  g.beginPath();
+  g.ellipse(0, 1, 16, 13, -0.3, 0, 7);
+  g.fill();
+  // fingers with knuckle creases
+  for (let i = 0; i < 4; i++) {
+    const fx = -13 + i * 7.6, fy = -7 - i * 1.1;
+    const fg = g.createLinearGradient(fx, fy - 9, fx, fy + 9);
+    fg.addColorStop(0, "#615950");
+    fg.addColorStop(0.55, "#443d35");
+    fg.addColorStop(1, "#262220");
+    g.fillStyle = fg;
+    g.beginPath();
+    g.roundRect(fx, fy - 9, 6.6, 18, 3.3);
+    g.fill();
+    g.strokeStyle = "rgba(0,0,0,0.45)";
+    g.lineWidth = 0.8;
+    for (const cy2 of [fy - 3.5, fy + 1]) {
+      g.beginPath();
+      g.moveTo(fx + 0.8, cy2);
+      g.lineTo(fx + 5.8, cy2);
+      g.stroke();
+    }
+    g.fillStyle = "rgba(255,240,220,0.13)";
+    g.fillRect(fx + 1, fy - 8, 1.7, 14);
+  }
+  // stitching
+  g.strokeStyle = "rgba(195,185,165,0.3)";
+  g.lineWidth = 0.6;
+  g.setLineDash([1.6, 1.6]);
+  g.beginPath();
+  g.ellipse(0, 3, 12.5, 9, -0.3, 0, 7);
+  g.stroke();
+  g.setLineDash([]);
+  g.restore();
+}
+
 const WEAPON_W = 190, WEAPON_H = 170;
 
 const GUN_BLASTER = (() => {
   const c = gunCanvas(WEAPON_W, WEAPON_H, g => {
-  const cx = 95;
-
-  // --- left glove gripping the fore-end (behind barrel)
-  g.fillStyle = "#4a3526";
-  g.beginPath();
-  g.ellipse(cx - 34, 96, 17, 13, -0.5, 0, 7);
-  g.fill();
-  for (let i = 0; i < 3; i++) {
+    const cx = 95;
+    tacticalHand(g, cx - 42, 122, 1.15, -0.5);
+    // tapered slide, polished steel
+    g.fillStyle = cyl(g, cx - 30, cx + 30, STEEL_T);
     g.beginPath();
-    g.ellipse(cx - 26 + i * 7, 86 - i * 2, 5.5, 8, -0.35, 0, 7);
+    g.moveTo(cx - 20, 18);
+    g.lineTo(cx + 20, 18);
+    g.lineTo(cx + 29, 118);
+    g.lineTo(cx - 29, 118);
+    g.closePath();
     g.fill();
-  }
-  g.fillStyle = "rgba(255,220,180,0.14)";
-  g.beginPath();
-  g.ellipse(cx - 38, 92, 8, 5, -0.5, 0, 7);
-  g.fill();
-
-  // --- barrel shroud (cylinder shading)
-  const barrel = g.createLinearGradient(cx - 26, 0, cx + 26, 0);
-  barrel.addColorStop(0, "#14171d");
-  barrel.addColorStop(0.32, "#535c6c");
-  barrel.addColorStop(0.5, "#6a7588");
-  barrel.addColorStop(0.68, "#444c5a");
-  barrel.addColorStop(1, "#0f1116");
-  g.fillStyle = barrel;
-  g.beginPath();
-  g.moveTo(cx - 17, 18);
-  g.lineTo(cx + 17, 18);
-  g.lineTo(cx + 27, 108);
-  g.lineTo(cx - 27, 108);
-  g.closePath();
-  g.fill();
-
-  // cooling ribs
-  for (let i = 0; i < 5; i++) {
-    const y = 32 + i * 14;
-    const wHalf = 18 + (y - 18) * 0.11;
-    g.fillStyle = "rgba(0,0,0,0.45)";
-    g.fillRect(cx - wHalf, y, wHalf * 2, 3.5);
-    g.fillStyle = "rgba(255,255,255,0.10)";
-    g.fillRect(cx - wHalf, y + 3.5, wHalf * 2, 1.4);
-  }
-
-  // muzzle ring
-  g.fillStyle = "#586070";
-  g.beginPath();
-  g.ellipse(cx, 18, 17, 7, 0, 0, 7);
-  g.fill();
-  g.fillStyle = "#07090c";
-  g.beginPath();
-  g.ellipse(cx, 18, 13, 5, 0, 0, 7);
-  g.fill();
-  g.strokeStyle = "#3fe06a";
-  g.lineWidth = 1.6;
-  g.beginPath();
-  g.ellipse(cx, 18, 9.5, 3.4, 0, 0, 7);
-  g.stroke();
-
-  // collar with rivets
-  const collar = g.createLinearGradient(cx - 30, 0, cx + 30, 0);
-  collar.addColorStop(0, "#181b22");
-  collar.addColorStop(0.5, "#5c6678");
-  collar.addColorStop(1, "#13151b");
-  g.fillStyle = collar;
-  g.fillRect(cx - 30, 104, 60, 13);
-  g.fillStyle = "#7d8aa0";
-  for (let i = -2; i <= 2; i++) {
+    // top sight rib
+    g.fillStyle = "rgba(0,0,0,0.28)";
+    g.fillRect(cx - 4, 18, 8, 100);
+    g.fillStyle = "rgba(255,255,255,0.1)";
+    g.fillRect(cx - 5, 18, 1.5, 100);
+    // ejection port
+    g.fillStyle = "#0c0f14";
     g.beginPath();
-    g.arc(cx + i * 13, 110.5, 1.8, 0, 7);
+    g.roundRect(cx + 8, 42, 15, 20, 3);
     g.fill();
-  }
-
-  // receiver
-  const recv = g.createLinearGradient(cx - 40, 0, cx + 40, 0);
-  recv.addColorStop(0, "#171a20");
-  recv.addColorStop(0.45, "#3d4452");
-  recv.addColorStop(1, "#121419");
-  g.fillStyle = recv;
-  g.beginPath();
-  g.moveTo(cx - 32, 117);
-  g.lineTo(cx + 32, 117);
-  g.lineTo(cx + 42, 170);
-  g.lineTo(cx - 42, 170);
-  g.closePath();
-  g.fill();
-
-  // vents on receiver
-  g.fillStyle = "#06070a";
-  for (let i = 0; i < 3; i++) g.fillRect(cx + 14, 124 + i * 7, 18 + i * 2, 3);
-
-  // energy cell window (glow refreshed live by the game)
-  g.fillStyle = "#0a0c10";
-  g.fillRect(cx - 26, 126, 30, 16);
-  g.strokeStyle = "#5c6678";
-  g.lineWidth = 2;
-  g.strokeRect(cx - 26, 126, 30, 16);
-
-  // --- right glove on the side
-  glove(g, cx + 44, 156, 20, 16, 0.5, true);
+    g.strokeStyle = "rgba(180,195,210,0.4)";
+    g.lineWidth = 1;
+    g.stroke();
+    // slide serrations near the viewer
+    for (let i = -4; i <= 4; i++) {
+      g.fillStyle = "rgba(0,0,0,0.5)";
+      g.fillRect(cx + i * 6 - 1, 96, 2.4, 18);
+      g.fillStyle = "rgba(210,220,235,0.18)";
+      g.fillRect(cx + i * 6 + 1.4, 96, 1, 18);
+    }
+    // muzzle: rim, bore, energy ring
+    g.fillStyle = cyl(g, cx - 16, cx + 16, STEEL_T);
+    g.beginPath();
+    g.ellipse(cx, 17, 15, 5.5, 0, 0, 7);
+    g.fill();
+    g.fillStyle = "#04060a";
+    g.beginPath();
+    g.ellipse(cx, 16.5, 9.5, 3.4, 0, 0, 7);
+    g.fill();
+    g.strokeStyle = "rgba(63,224,106,0.9)";
+    g.lineWidth = 1.4;
+    g.beginPath();
+    g.ellipse(cx, 16.5, 6.5, 2.2, 0, 0, 7);
+    g.stroke();
+    // front sight
+    g.fillStyle = "#1a1e26";
+    g.fillRect(cx - 2.4, 6, 4.8, 11);
+    g.fillStyle = "#e8f4e8";
+    g.beginPath();
+    g.arc(cx, 9, 1.3, 0, 7);
+    g.fill();
+    // rear sight
+    g.fillStyle = "#14181f";
+    g.fillRect(cx - 15, 108, 30, 9);
+    g.fillStyle = "#04060a";
+    g.fillRect(cx - 4, 108, 8, 5);
+    g.fillStyle = "#e8f4e8";
+    g.beginPath();
+    g.arc(cx - 9, 112, 1.2, 0, 7);
+    g.arc(cx + 9, 112, 1.2, 0, 7);
+    g.fill();
+    screwHead(g, cx - 24, 72, 2.2);
+    screwHead(g, cx + 24, 72, 2.2);
+    // frame
+    g.fillStyle = cyl(g, cx - 42, cx + 42, ["#0a0c10", "#252b35", "#444e60", "#5c687c", "#39414f", "#11141a"]);
+    g.beginPath();
+    g.moveTo(cx - 32, 118);
+    g.lineTo(cx + 32, 118);
+    g.lineTo(cx + 42, 170);
+    g.lineTo(cx - 42, 170);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "rgba(255,255,255,0.12)";
+    g.fillRect(cx - 32, 118, 64, 2);
+    // energy cell window (live glow drawn by the game)
+    g.fillStyle = "#05080a";
+    g.beginPath();
+    g.roundRect(cx - 31, 130, 24, 17, 3);
+    g.fill();
+    g.strokeStyle = "#5c687c";
+    g.lineWidth = 1.6;
+    g.stroke();
+    // frame vents
+    g.fillStyle = "#0a0d12";
+    for (let i = 0; i < 3; i++) g.fillRect(cx + 12, 128 + i * 8, 22 + i * 2, 3.4);
+    wear(g, cx - 28, 20, 56, 96, 26);
+    tacticalHand(g, cx + 46, 152, 1.35, 0.45);
   });
-  return { c, w: WEAPON_W, h: WEAPON_H, mx: 95, my: 14, cell: { x: 95 - 26, y: 126, w: 30, h: 16 } };
+  return { c, w: WEAPON_W, h: WEAPON_H, mx: 95, my: 14, cell: { x: 95 - 31, y: 130, w: 24, h: 17 } };
 })();
 
 const GUN_MALLET = (() => {
   const w = 150, h = 175;
   const c = gunCanvas(w, h, g => {
     const cx = 75;
-    // handle
-    const hg = g.createLinearGradient(cx - 7, 0, cx + 7, 0);
-    hg.addColorStop(0, "#3a2812");
-    hg.addColorStop(0.5, "#7a5526");
-    hg.addColorStop(1, "#2c1e0e");
-    g.fillStyle = hg;
-    g.fillRect(cx - 7, 52, 14, 123);
-    // grip wraps
-    g.fillStyle = "rgba(0,0,0,0.35)";
-    for (let i = 0; i < 5; i++) g.fillRect(cx - 7, 120 + i * 9, 14, 4);
-    // head
-    const mg = g.createLinearGradient(cx - 42, 0, cx + 42, 0);
-    mg.addColorStop(0, "#1c1f26");
-    mg.addColorStop(0.5, "#5a6374");
-    mg.addColorStop(1, "#14161c");
-    g.fillStyle = mg;
-    g.fillRect(cx - 42, 14, 84, 44);
-    g.fillStyle = "rgba(255,255,255,0.14)";
-    g.fillRect(cx - 42, 14, 84, 4);
+    // forged steel head
+    g.fillStyle = cyl(g, cx - 44, cx + 44, ["#16191f", "#3c4452", "#6a7688", "#959fb1", "#5d6878", "#23282f", "#0d0f13"]);
+    g.beginPath();
+    g.roundRect(cx - 44, 14, 88, 46, 4);
+    g.fill();
+    // bevels
+    g.fillStyle = "rgba(235,242,250,0.25)";
+    g.fillRect(cx - 42, 15, 84, 4);
     g.fillStyle = "rgba(0,0,0,0.4)";
-    g.fillRect(cx - 42, 52, 84, 6);
-    // spikes
-    g.fillStyle = "#9aa2b2";
+    g.fillRect(cx - 42, 55, 84, 4);
+    // forge mottling
+    for (let i = 0; i < 70; i++) {
+      g.fillStyle = `rgba(${rnd() < 0.5 ? "0,0,0" : "200,210,225"},${0.05 + rnd() * 0.08})`;
+      g.fillRect(cx - 42 + rnd() * 84, 18 + rnd() * 38, 1 + rnd() * 3, 1 + rnd() * 2);
+    }
+    // spikes, two-tone faces with glints
     for (const sx of [-30, 0, 30]) {
+      g.fillStyle = "#7d8a9c";
       g.beginPath();
-      g.moveTo(cx + sx - 7, 14);
-      g.lineTo(cx + sx + 7, 14);
-      g.lineTo(cx + sx, 0);
+      g.moveTo(cx + sx - 8, 15);
+      g.lineTo(cx + sx, -2);
+      g.lineTo(cx + sx, 15);
       g.closePath();
       g.fill();
+      g.fillStyle = "#39414e";
+      g.beginPath();
+      g.moveTo(cx + sx + 8, 15);
+      g.lineTo(cx + sx, -2);
+      g.lineTo(cx + sx, 15);
+      g.closePath();
+      g.fill();
+      g.fillStyle = "rgba(255,255,255,0.85)";
+      g.fillRect(cx + sx - 0.8, 0, 1.6, 3);
     }
-    // old blood
-    g.fillStyle = "rgba(140,20,12,0.5)";
-    g.beginPath();
-    g.ellipse(cx + 20, 40, 12, 8, 0.4, 0, 7);
-    g.fill();
-    g.fillRect(cx + 26, 48, 4, 14);
-    glove(g, cx + 2, 158, 19, 14, 0.1, true);
+    // dried blood
+    for (const [bx, by, br] of [[cx + 18, 38, 11], [cx - 24, 46, 7], [cx + 30, 52, 5]]) {
+      const bg = g.createRadialGradient(bx, by, 1, bx, by, br);
+      bg.addColorStop(0, "rgba(122,16,10,0.7)");
+      bg.addColorStop(1, "rgba(60,8,5,0)");
+      g.fillStyle = bg;
+      g.beginPath();
+      g.arc(bx, by, br, 0, 7);
+      g.fill();
+    }
+    g.fillStyle = "rgba(100,12,8,0.65)";
+    g.fillRect(cx + 24, 56, 3, 16);
+    g.fillRect(cx + 14, 58, 2, 10);
+    // steel collar
+    g.fillStyle = cyl(g, cx - 11, cx + 11, STEEL_T);
+    g.fillRect(cx - 11, 60, 22, 10);
+    screwHead(g, cx - 5, 65, 2);
+    screwHead(g, cx + 5, 65, 2);
+    // hardwood handle with grain
+    g.fillStyle = cyl(g, cx - 8, cx + 8, ["#2e1a0c", "#5a3517", "#7d4f24", "#8f5e2c", "#6e4119", "#33200e"]);
+    g.fillRect(cx - 8, 70, 16, 105);
+    g.strokeStyle = "rgba(46,22,8,0.5)";
+    g.lineWidth = 0.8;
+    for (let i = 0; i < 5; i++) {
+      g.beginPath();
+      g.moveTo(cx - 6 + i * 3, 70);
+      g.bezierCurveTo(cx - 7 + i * 3, 100, cx - 5 + i * 3, 130, cx - 6 + i * 3, 175);
+      g.stroke();
+    }
+    // leather grip wrap
+    for (let i = 0; i < 6; i++) {
+      const y = 118 + i * 9;
+      g.fillStyle = i % 2 ? "#241710" : "#2e1e14";
+      g.beginPath();
+      g.roundRect(cx - 10, y, 20, 9.6, 3);
+      g.fill();
+      g.fillStyle = "rgba(255,235,210,0.1)";
+      g.fillRect(cx - 9, y + 1, 18, 1.4);
+    }
+    tacticalHand(g, cx + 4, 158, 1.3, 0.1);
   });
   return { c, w, h, mx: 75, my: 8 };
 })();
@@ -1687,45 +1765,94 @@ const GUN_SHOTGUN = (() => {
   const w = 200, h = 170;
   const c = gunCanvas(w, h, g => {
     const cx = 100;
-    // twin barrels
-    barrelShape(g, cx - 12, 22, 92, 9, 13, STEEL);
-    barrelShape(g, cx + 12, 22, 92, 9, 13, STEEL);
-    for (const bx of [-12, 12]) {
-      g.fillStyle = "#586070";
+    // twin blued barrels
+    for (const off of [-13, 13]) {
+      g.fillStyle = cyl(g, cx + off - 13, cx + off + 13, BLUED_T);
       g.beginPath();
-      g.ellipse(cx + bx, 22, 9, 4.5, 0, 0, 7);
-      g.fill();
-      g.fillStyle = "#07090c";
-      g.beginPath();
-      g.ellipse(cx + bx, 22, 6, 3, 0, 0, 7);
+      g.moveTo(cx + off - 9, 22);
+      g.lineTo(cx + off + 9, 22);
+      g.lineTo(cx + off + 13, 94);
+      g.lineTo(cx + off - 13, 94);
+      g.closePath();
       g.fill();
     }
-    // wooden fore-end / pump
-    const wd = g.createLinearGradient(cx - 30, 0, cx + 30, 0);
-    wd.addColorStop(0, "#2e1d0c");
-    wd.addColorStop(0.5, "#7a5526");
-    wd.addColorStop(1, "#241608");
-    g.fillStyle = wd;
-    g.fillRect(cx - 28, 92, 56, 26);
-    g.fillStyle = "rgba(0,0,0,0.3)";
-    for (let i = 0; i < 3; i++) g.fillRect(cx - 28, 98 + i * 7, 56, 2.5);
-    // receiver
-    const recv = g.createLinearGradient(cx - 36, 0, cx + 36, 0);
-    recv.addColorStop(0, "#15171d");
-    recv.addColorStop(0.5, "#3d4452");
-    recv.addColorStop(1, "#101218");
-    g.fillStyle = recv;
+    // centre rib with vents
+    g.fillStyle = "#11151d";
+    g.fillRect(cx - 3, 24, 6, 70);
+    g.fillStyle = "#04060a";
+    for (let i = 0; i < 6; i++) g.fillRect(cx - 1.6, 30 + i * 10, 3.2, 5);
+    // muzzles: rims, bores, inner reflection
+    for (const off of [-13, 13]) {
+      g.fillStyle = cyl(g, cx + off - 11, cx + off + 11, STEEL_T);
+      g.beginPath();
+      g.ellipse(cx + off, 21, 10.5, 4.6, 0, 0, 7);
+      g.fill();
+      g.fillStyle = "#03050a";
+      g.beginPath();
+      g.ellipse(cx + off, 21, 7, 3, 0, 0, 7);
+      g.fill();
+      g.strokeStyle = "rgba(160,180,205,0.5)";
+      g.lineWidth = 0.9;
+      g.beginPath();
+      g.ellipse(cx + off - 1.4, 20.3, 4.4, 1.7, 0, Math.PI * 0.9, Math.PI * 1.8);
+      g.stroke();
+    }
+    wear(g, cx - 24, 26, 48, 64, 18);
+    // walnut fore-end with checkering
+    g.fillStyle = cyl(g, cx - 30, cx + 30, ["#2a1709", "#5a3517", "#7d4f24", "#94622e", "#6e4119", "#301d0c"]);
     g.beginPath();
-    g.moveTo(cx - 30, 118);
-    g.lineTo(cx + 30, 118);
-    g.lineTo(cx + 40, 170);
-    g.lineTo(cx - 40, 170);
+    g.roundRect(cx - 28, 94, 56, 30, 6);
+    g.fill();
+    g.strokeStyle = "rgba(42,20,8,0.55)";
+    g.lineWidth = 0.8;
+    for (let i = 0; i < 6; i++) {
+      g.beginPath();
+      g.moveTo(cx - 26, 98 + i * 4.5);
+      g.bezierCurveTo(cx - 8, 96 + i * 4.5, cx + 10, 100 + i * 4.5, cx + 26, 97 + i * 4.5);
+      g.stroke();
+    }
+    // checkering panel
+    g.save();
+    g.beginPath();
+    g.roundRect(cx - 18, 99, 36, 20, 4);
+    g.clip();
+    g.strokeStyle = "rgba(30,15,6,0.6)";
+    g.lineWidth = 0.7;
+    for (let i = -10; i < 10; i++) {
+      g.beginPath();
+      g.moveTo(cx - 20 + i * 4, 98);
+      g.lineTo(cx - 8 + i * 4, 122);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(cx + 20 - i * 4, 98);
+      g.lineTo(cx + 8 - i * 4, 122);
+      g.stroke();
+    }
+    g.restore();
+    // receiver, engraved
+    g.fillStyle = cyl(g, cx - 40, cx + 40, BLUED_T);
+    g.beginPath();
+    g.moveTo(cx - 31, 124);
+    g.lineTo(cx + 31, 124);
+    g.lineTo(cx + 41, 170);
+    g.lineTo(cx - 41, 170);
     g.closePath();
     g.fill();
-    g.fillStyle = "#0a0b0e";
-    g.fillRect(cx - 18, 126, 36, 5);
-    glove(g, cx - 38, 104, 17, 13, -0.4);
-    glove(g, cx + 42, 152, 19, 15, 0.5, true);
+    g.fillStyle = "rgba(255,255,255,0.14)";
+    g.fillRect(cx - 31, 124, 62, 2);
+    g.strokeStyle = "rgba(170,185,205,0.3)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(cx - 24, 136);
+    g.bezierCurveTo(cx - 10, 130, cx + 10, 142, cx + 24, 134);
+    g.stroke();
+    // top lever + pins
+    g.fillStyle = "#1a202a";
+    g.fillRect(cx - 3, 126, 6, 16);
+    screwHead(g, cx - 22, 152, 2.4);
+    screwHead(g, cx + 22, 152, 2.4);
+    tacticalHand(g, cx - 40, 108, 1.25, -0.4);
+    tacticalHand(g, cx + 46, 154, 1.35, 0.45);
   });
   return { c, w, h, mx: 100, my: 20 };
 })();
@@ -1734,48 +1861,112 @@ const GUN_CHAINGUN = (() => {
   const w = 210, h = 170;
   const c = gunCanvas(w, h, g => {
     const cx = 105;
-    // six-barrel drum
-    g.fillStyle = "#15171d";
+    // outer shroud ring with cooling holes
+    const ring = g.createRadialGradient(cx - 8, 28, 4, cx, 36, 42);
+    ring.addColorStop(0, "#5d6878");
+    ring.addColorStop(0.6, "#2e3540");
+    ring.addColorStop(1, "#0b0d11");
+    g.fillStyle = ring;
     g.beginPath();
-    g.ellipse(cx, 34, 34, 22, 0, 0, 7);
+    g.ellipse(cx, 38, 40, 30, 0, 0, 7);
     g.fill();
+    g.strokeStyle = "rgba(200,212,228,0.25)";
+    g.lineWidth = 1.4;
+    g.beginPath();
+    g.ellipse(cx, 38, 38, 28, 0, Math.PI * 0.95, Math.PI * 1.7);
+    g.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4 + 0.4;
+      g.fillStyle = "#05070a";
+      g.beginPath();
+      g.ellipse(cx + Math.cos(a) * 33, 38 + Math.sin(a) * 24, 2.6, 2, 0, 0, 7);
+      g.fill();
+    }
+    // six barrels
     for (let i = 0; i < 6; i++) {
       const a = i * Math.PI / 3 + 0.26;
-      const bx = cx + Math.cos(a) * 19, by = 34 + Math.sin(a) * 12;
-      g.fillStyle = "#3c4452";
+      const bx = cx + Math.cos(a) * 20, by = 37 + Math.sin(a) * 14;
+      const bg = g.createRadialGradient(bx - 3, by - 3, 1, bx, by, 10);
+      bg.addColorStop(0, "#9aa6ba");
+      bg.addColorStop(0.5, "#4c5666");
+      bg.addColorStop(1, "#14181f");
+      g.fillStyle = bg;
       g.beginPath();
-      g.ellipse(bx, by, 8, 5.5, 0, 0, 7);
+      g.ellipse(bx, by, 9, 6.6, 0, 0, 7);
       g.fill();
-      g.fillStyle = "#06070a";
+      g.fillStyle = "#04060a";
       g.beginPath();
-      g.ellipse(bx, by, 5, 3.4, 0, 0, 7);
+      g.ellipse(bx, by, 5.2, 3.6, 0, 0, 7);
       g.fill();
+      g.strokeStyle = "rgba(170,185,205,0.4)";
+      g.lineWidth = 0.8;
+      g.beginPath();
+      g.ellipse(bx - 1, by - 1, 3, 2, 0, Math.PI, Math.PI * 1.7);
+      g.stroke();
     }
-    g.fillStyle = "#586070";
+    // hub with hex bolt
+    const hub = g.createRadialGradient(cx - 2, 35, 1, cx, 37, 9);
+    hub.addColorStop(0, "#c2ccda");
+    hub.addColorStop(0.6, "#5d6878");
+    hub.addColorStop(1, "#1a1f27");
+    g.fillStyle = hub;
     g.beginPath();
-    g.arc(cx, 34, 6, 0, 7);
+    g.ellipse(cx, 37, 8.5, 6, 0, 0, 7);
     g.fill();
-    // shroud down to housing
-    barrelShape(g, cx, 50, 110, 32, 40, ["#101218", "#3a414e", "#566074"]);
-    g.fillStyle = "rgba(0,0,0,0.4)";
-    for (let i = 0; i < 3; i++) g.fillRect(cx - 34, 62 + i * 16, 68, 4);
-    // housing
-    const recv = g.createLinearGradient(cx - 48, 0, cx + 48, 0);
-    recv.addColorStop(0, "#14161c");
-    recv.addColorStop(0.5, "#3d4452");
-    recv.addColorStop(1, "#0f1116");
-    g.fillStyle = recv;
-    g.fillRect(cx - 46, 110, 92, 60);
-    // ammo belt
-    g.fillStyle = "#1c1f26";
-    g.fillRect(cx - 64, 122, 22, 40);
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle = "#c9a227";
-      g.fillRect(cx - 60, 126 + i * 8, 14, 4.5);
+    g.strokeStyle = "#0b0d11";
+    g.lineWidth = 1.2;
+    g.beginPath();
+    for (let i = 0; i <= 6; i++) {
+      const a = i * Math.PI / 3;
+      const px = cx + Math.cos(a) * 4.6, py = 37 + Math.sin(a) * 3.3;
+      i ? g.lineTo(px, py) : g.moveTo(px, py);
     }
-    g.fillStyle = "#0a0b0e";
-    g.fillRect(cx - 30, 120, 60, 6);
-    glove(g, cx + 48, 150, 19, 15, 0.5, true);
+    g.stroke();
+    // barrel cluster body sweeping down
+    g.fillStyle = cyl(g, cx - 40, cx + 40, STEEL_T);
+    g.beginPath();
+    g.moveTo(cx - 36, 60);
+    g.lineTo(cx + 36, 60);
+    g.lineTo(cx + 42, 112);
+    g.lineTo(cx - 42, 112);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "rgba(0,0,0,0.35)";
+    for (let i = 0; i < 3; i++) g.fillRect(cx - 38, 68 + i * 14, 78, 4);
+    wear(g, cx - 36, 62, 72, 48, 20);
+    // housing
+    g.fillStyle = cyl(g, cx - 50, cx + 50, ["#0a0c10", "#272d38", "#454f61", "#5d6878", "#39414f", "#10131a"]);
+    g.fillRect(cx - 46, 112, 92, 58);
+    g.fillStyle = "rgba(255,255,255,0.12)";
+    g.fillRect(cx - 46, 112, 92, 2);
+    screwHead(g, cx - 38, 122, 2.4);
+    screwHead(g, cx + 38, 122, 2.4);
+    screwHead(g, cx - 38, 160, 2.4);
+    screwHead(g, cx + 38, 160, 2.4);
+    // ammo feed chute with linked brass
+    g.fillStyle = "#171b22";
+    g.beginPath();
+    g.roundRect(cx - 74, 120, 30, 46, 5);
+    g.fill();
+    for (let i = 0; i < 5; i++) {
+      const y = 125 + i * 8.4;
+      const bg = g.createLinearGradient(cx - 70, y, cx - 48, y);
+      bg.addColorStop(0, "#6e5418");
+      bg.addColorStop(0.4, "#caa53a");
+      bg.addColorStop(0.7, "#e8cc6a");
+      bg.addColorStop(1, "#8a6c20");
+      g.fillStyle = bg;
+      g.beginPath();
+      g.roundRect(cx - 70, y, 22, 6, 3);
+      g.fill();
+      g.fillStyle = "#b46a32";
+      g.beginPath();
+      g.roundRect(cx - 70, y, 5, 6, 2.5);
+      g.fill();
+      g.fillStyle = "rgba(20,16,8,0.6)";
+      g.fillRect(cx - 52, y + 1, 2, 4);
+    }
+    tacticalHand(g, cx + 50, 150, 1.35, 0.45);
   });
   return { c, w, h, mx: 105, my: 30 };
 })();
@@ -1784,57 +1975,98 @@ const GUN_ROCKET = (() => {
   const w = 210, h = 170;
   const c = gunCanvas(w, h, g => {
     const cx = 105;
-    // fat tube
-    barrelShape(g, cx, 30, 122, 30, 42, ["#14161c", "#3c4452", "#5a6476"]);
-    // muzzle opening with loaded rocket visible
-    g.fillStyle = "#586070";
+    // olive launch tube
+    g.fillStyle = cyl(g, cx - 42, cx + 42, OLIVE_T);
     g.beginPath();
-    g.ellipse(cx, 30, 30, 12, 0, 0, 7);
+    g.moveTo(cx - 31, 32);
+    g.lineTo(cx + 31, 32);
+    g.lineTo(cx + 43, 124);
+    g.lineTo(cx - 43, 124);
+    g.closePath();
     g.fill();
-    g.fillStyle = "#060709";
-    g.beginPath();
-    g.ellipse(cx, 30, 24, 9, 0, 0, 7);
-    g.fill();
-    const rg = g.createRadialGradient(cx - 3, 28, 1, cx, 30, 12);
-    rg.addColorStop(0, "#e8a08a");
-    rg.addColorStop(0.6, "#b03426");
-    rg.addColorStop(1, "#5a1009");
-    g.fillStyle = rg;
-    g.beginPath();
-    g.ellipse(cx, 30, 11, 5.5, 0, 0, 7);
-    g.fill();
-    // bands
-    g.fillStyle = "rgba(0,0,0,0.42)";
-    g.fillRect(cx - 33, 52, 66, 5);
-    g.fillRect(cx - 38, 92, 76, 5);
-    // hazard ring
-    g.save();
-    g.beginPath();
-    g.rect(cx - 36, 70, 72, 9);
-    g.clip();
-    g.fillStyle = "#8f7a1e";
-    g.fillRect(cx - 36, 70, 72, 9);
-    g.fillStyle = "#15151a";
-    for (let x = -40; x < 44; x += 12) {
-      g.beginPath();
-      g.moveTo(cx + x, 79);
-      g.lineTo(cx + x + 5, 70);
-      g.lineTo(cx + x + 10, 70);
-      g.lineTo(cx + x + 5, 79);
-      g.closePath();
-      g.fill();
+    // weld seams
+    for (const y of [56, 92]) {
+      g.fillStyle = "rgba(220,228,200,0.18)";
+      g.fillRect(cx - 38, y, 76, 1.6);
+      g.fillStyle = "rgba(0,0,0,0.4)";
+      g.fillRect(cx - 38, y + 1.6, 76, 1.6);
     }
+    // stencil
+    g.save();
+    g.translate(cx - 14, 78);
+    g.rotate(0.04);
+    g.font = "bold 9px monospace";
+    g.fillStyle = "rgba(228,232,214,0.55)";
+    g.fillText("GRMP-5", 0, 0);
+    g.font = "6px monospace";
+    g.fillText("HE ROCKET", 0, 8);
     g.restore();
-    // sight
-    g.fillStyle = "#1c1f26";
-    g.fillRect(cx + 26, 40, 8, 30);
-    g.fillStyle = "#3fe06a";
-    g.fillRect(cx + 28, 44, 4, 4);
-    // base housing
-    g.fillStyle = "#181b22";
-    g.fillRect(cx - 46, 122, 92, 48);
-    glove(g, cx - 44, 138, 18, 14, -0.4);
-    glove(g, cx + 46, 152, 19, 15, 0.5, true);
+    // hazard decal
+    g.fillStyle = "#b89a22";
+    g.beginPath();
+    g.moveTo(cx - 26, 106);
+    g.lineTo(cx - 14, 106);
+    g.lineTo(cx - 20, 95);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#14130a";
+    g.font = "bold 8px monospace";
+    g.textAlign = "center";
+    g.fillText("!", cx - 20, 104.5);
+    g.textAlign = "left";
+    wear(g, cx - 38, 36, 76, 84, 26);
+    // muzzle: steel rim, loaded rocket
+    g.fillStyle = cyl(g, cx - 34, cx + 34, STEEL_T);
+    g.beginPath();
+    g.ellipse(cx, 31, 32, 12.5, 0, 0, 7);
+    g.fill();
+    g.fillStyle = "#04050a";
+    g.beginPath();
+    g.ellipse(cx, 31, 26, 9.6, 0, 0, 7);
+    g.fill();
+    const nose = g.createRadialGradient(cx - 4, 27, 1, cx, 31, 14);
+    nose.addColorStop(0, "#f0a08a");
+    nose.addColorStop(0.4, "#c0392b");
+    nose.addColorStop(1, "#5a1009");
+    g.fillStyle = nose;
+    g.beginPath();
+    g.ellipse(cx, 31, 12, 5.6, 0, 0, 7);
+    g.fill();
+    g.fillStyle = "rgba(255,255,255,0.8)";
+    g.beginPath();
+    g.arc(cx - 4, 28.5, 1.4, 0, 7);
+    g.fill();
+    g.strokeStyle = "rgba(190,205,220,0.5)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.ellipse(cx - 4, 28, 18, 6.5, 0, Math.PI * 0.95, Math.PI * 1.6);
+    g.stroke();
+    // optic with lens glint
+    g.fillStyle = "#171b14";
+    g.beginPath();
+    g.roundRect(cx + 30, 46, 13, 34, 4);
+    g.fill();
+    const lens = g.createRadialGradient(cx + 35, 52, 0.5, cx + 36.5, 54, 5.5);
+    lens.addColorStop(0, "#cdf6ff");
+    lens.addColorStop(0.5, "#2e8aa0");
+    lens.addColorStop(1, "#0a2a34");
+    g.fillStyle = lens;
+    g.beginPath();
+    g.arc(cx + 36.5, 54, 5, 0, 7);
+    g.fill();
+    screwHead(g, cx + 36.5, 72, 2);
+    // rivet rows
+    for (let i = 0; i < 4; i++) {
+      screwHead(g, cx - 34 + i * 2.4, 40 + i * 24, 1.6);
+      screwHead(g, cx + 34 - i * 2.4, 40 + i * 24, 1.6);
+    }
+    // rear housing
+    g.fillStyle = cyl(g, cx - 50, cx + 50, ["#101207", "#33391b", "#4d5827", "#5d6a30", "#3a4220", "#181b0d"]);
+    g.fillRect(cx - 48, 124, 96, 46);
+    g.fillStyle = "rgba(235,240,220,0.14)";
+    g.fillRect(cx - 48, 124, 96, 2);
+    tacticalHand(g, cx - 46, 140, 1.25, -0.4);
+    tacticalHand(g, cx + 48, 154, 1.35, 0.45);
   });
   return { c, w, h, mx: 105, my: 26 };
 })();
@@ -1843,48 +2075,92 @@ const GUN_PLASMA = (() => {
   const w = 200, h = 170;
   const c = gunCanvas(w, h, g => {
     const cx = 100;
-    // snout
-    barrelShape(g, cx, 26, 100, 22, 32, ["#101820", "#2c4438", "#3e6450"]);
-    // emitter
-    g.fillStyle = "#0a0f0c";
+    // gunmetal snout
+    g.fillStyle = cyl(g, cx - 34, cx + 34, GUNMETAL_T);
     g.beginPath();
-    g.ellipse(cx, 26, 20, 8, 0, 0, 7);
-    g.fill();
-    const em = g.createRadialGradient(cx, 26, 1, cx, 26, 14);
-    em.addColorStop(0, "#d8ffd0");
-    em.addColorStop(0.5, "#3fe06a");
-    em.addColorStop(1, "rgba(20,120,40,0)");
-    g.fillStyle = em;
-    g.beginPath();
-    g.ellipse(cx, 26, 14, 6, 0, 0, 7);
-    g.fill();
-    // glowing coils
-    for (let i = 0; i < 3; i++) {
-      const y = 44 + i * 20;
-      g.fillStyle = "#0c1410";
-      g.fillRect(cx - 26 - i * 2, y, 52 + i * 4, 9);
-      g.fillStyle = "rgba(63,224,106,0.85)";
-      g.fillRect(cx - 24 - i * 2, y + 2.5, 48 + i * 4, 4);
-      g.fillStyle = "rgba(200,255,210,0.8)";
-      g.fillRect(cx - 24 - i * 2, y + 3.6, 48 + i * 4, 1.4);
-    }
-    // housing
-    const recv = g.createLinearGradient(cx - 40, 0, cx + 40, 0);
-    recv.addColorStop(0, "#121a16");
-    recv.addColorStop(0.5, "#2c4438");
-    recv.addColorStop(1, "#0e1410");
-    g.fillStyle = recv;
-    g.beginPath();
-    g.moveTo(cx - 34, 100);
-    g.lineTo(cx + 34, 100);
-    g.lineTo(cx + 42, 170);
-    g.lineTo(cx - 42, 170);
+    g.moveTo(cx - 23, 28);
+    g.lineTo(cx + 23, 28);
+    g.lineTo(cx + 34, 104);
+    g.lineTo(cx - 34, 104);
     g.closePath();
     g.fill();
-    g.fillStyle = "#06090a";
-    for (let i = 0; i < 3; i++) g.fillRect(cx + 12, 110 + i * 9, 24, 4);
-    glove(g, cx - 40, 116, 17, 13, -0.4);
-    glove(g, cx + 44, 154, 19, 15, 0.5, true);
+    // emitter
+    g.fillStyle = "#04080a";
+    g.beginPath();
+    g.ellipse(cx, 27, 21, 8.4, 0, 0, 7);
+    g.fill();
+    const em = g.createRadialGradient(cx, 27, 1, cx, 27, 16);
+    em.addColorStop(0, "#eaffe4");
+    em.addColorStop(0.4, "#54e07e");
+    em.addColorStop(1, "rgba(18,110,44,0)");
+    g.fillStyle = em;
+    g.beginPath();
+    g.ellipse(cx, 27, 15, 6, 0, 0, 7);
+    g.fill();
+    g.strokeStyle = "rgba(230,255,230,0.7)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.ellipse(cx, 27, 18.5, 7.2, 0, 0, 7);
+    g.stroke();
+    // glowing coils with heat fins between
+    for (let i = 0; i < 3; i++) {
+      const y = 46 + i * 19;
+      const wHalf = 25 + (y - 28) * 0.14;
+      g.fillStyle = "#06090a";
+      g.fillRect(cx - wHalf, y, wHalf * 2, 9);
+      g.fillStyle = "rgba(40,200,90,0.3)";
+      g.fillRect(cx - wHalf + 1, y + 1, wHalf * 2 - 2, 7);
+      g.fillStyle = "rgba(98,240,140,0.75)";
+      g.fillRect(cx - wHalf + 2, y + 2.6, wHalf * 2 - 4, 3.8);
+      g.fillStyle = "#dcffd6";
+      g.fillRect(cx - wHalf + 2, y + 4, wHalf * 2 - 4, 1.3);
+      if (i < 2) {
+        for (let f = 0; f < 16; f++) {
+          const fx = cx - wHalf + 3 + f * (wHalf * 2 - 6) / 15;
+          g.fillStyle = f % 2 ? "#131c16" : "#2c3a30";
+          g.fillRect(fx, y + 9, 2, 10);
+        }
+      }
+    }
+    wear(g, cx - 28, 30, 56, 70, 16);
+    // housing
+    g.fillStyle = cyl(g, cx - 44, cx + 44, GUNMETAL_T);
+    g.beginPath();
+    g.moveTo(cx - 36, 104);
+    g.lineTo(cx + 36, 104);
+    g.lineTo(cx + 44, 170);
+    g.lineTo(cx - 44, 170);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "rgba(230,245,230,0.12)";
+    g.fillRect(cx - 36, 104, 72, 2);
+    // status screen
+    g.fillStyle = "#020604";
+    g.beginPath();
+    g.roundRect(cx - 32, 112, 26, 18, 3);
+    g.fill();
+    g.strokeStyle = "#39493c";
+    g.lineWidth = 1.4;
+    g.stroke();
+    g.fillStyle = "#54e07e";
+    for (let i = 0; i < 3; i++) g.fillRect(cx - 29, 116 + i * 4, 8 + (i * 7) % 14, 1.6);
+    // cable run
+    g.strokeStyle = "#0c120e";
+    g.lineWidth = 5;
+    g.beginPath();
+    g.moveTo(cx + 26, 110);
+    g.bezierCurveTo(cx + 44, 120, cx + 30, 142, cx + 42, 156);
+    g.stroke();
+    g.strokeStyle = "#2c3a30";
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(cx + 26, 110);
+    g.bezierCurveTo(cx + 44, 120, cx + 30, 142, cx + 42, 156);
+    g.stroke();
+    screwHead(g, cx - 36, 140, 2.2);
+    screwHead(g, cx + 10, 140, 2.2);
+    tacticalHand(g, cx - 42, 120, 1.25, -0.4);
+    tacticalHand(g, cx + 46, 156, 1.35, 0.45);
   });
   return { c, w, h, mx: 100, my: 22 };
 })();
@@ -1893,51 +2169,93 @@ const GUN_GBFG = (() => {
   const w = 240, h = 170;
   const c = gunCanvas(w, h, g => {
     const cx = 120;
-    // wide monster housing
-    barrelShape(g, cx, 36, 130, 52, 70, ["#101a12", "#23402a", "#356044"]);
-    // triple emitter orbs
-    for (const [ox, oy, r] of [[-26, 38, 12], [26, 38, 12], [0, 26, 15]]) {
-      g.fillStyle = "#06120a";
+    // armored housing
+    g.fillStyle = cyl(g, cx - 74, cx + 74, ["#05070a", "#142a1e", "#234433", "#2e5a42", "#1d3c2b", "#0a160e"]);
+    g.beginPath();
+    g.moveTo(cx - 52, 34);
+    g.lineTo(cx + 52, 34);
+    g.lineTo(cx + 72, 130);
+    g.lineTo(cx - 72, 130);
+    g.closePath();
+    g.fill();
+    // panel seams + screws
+    for (const y of [62, 96]) {
+      g.fillStyle = "rgba(0,0,0,0.45)";
+      g.fillRect(cx - 60, y, 120, 2.4);
+      g.fillStyle = "rgba(190,235,200,0.1)";
+      g.fillRect(cx - 60, y + 2.4, 120, 1.2);
+      screwHead(g, cx - 56, y + 8, 2.2);
+      screwHead(g, cx + 56, y + 8, 2.2);
+    }
+    // glowing intake vents
+    for (let i = 0; i < 4; i++) {
+      const x = cx - 26 + i * 14;
+      g.fillStyle = "#03130a";
+      g.fillRect(x, 104, 9, 18);
+      g.fillStyle = "rgba(82,224,122,0.6)";
+      g.fillRect(x + 2, 106, 5, 14);
+      g.fillStyle = "rgba(220,255,225,0.7)";
+      g.fillRect(x + 3.4, 106, 2, 14);
+    }
+    wear(g, cx - 56, 38, 112, 80, 28);
+    // triple emitter orbs with fresnel rims and under-glow
+    for (const [ox, oy, r] of [[-32, 44, 14], [32, 44, 14], [0, 28, 18]]) {
+      const glow = g.createRadialGradient(cx + ox, oy + r, r * 0.4, cx + ox, oy + r, r * 2.4);
+      glow.addColorStop(0, "rgba(70,220,115,0.35)");
+      glow.addColorStop(1, "rgba(20,120,50,0)");
+      g.fillStyle = glow;
       g.beginPath();
-      g.arc(cx + ox, oy, r + 3, 0, 7);
+      g.arc(cx + ox, oy + r, r * 2.4, 0, 7);
       g.fill();
-      const og = g.createRadialGradient(cx + ox - r * 0.3, oy - r * 0.3, 1, cx + ox, oy, r);
-      og.addColorStop(0, "#e8ffe0");
-      og.addColorStop(0.5, "#52e07a");
-      og.addColorStop(1, "#0e5a26");
-      g.fillStyle = og;
+      g.fillStyle = "#03150a";
+      g.beginPath();
+      g.arc(cx + ox, oy, r + 3.4, 0, 7);
+      g.fill();
+      const orb = g.createRadialGradient(cx + ox - r * 0.35, oy - r * 0.4, r * 0.1, cx + ox, oy, r);
+      orb.addColorStop(0, "#ffffff");
+      orb.addColorStop(0.25, "#bdffc8");
+      orb.addColorStop(0.55, "#39d465");
+      orb.addColorStop(0.85, "#0d4a22");
+      orb.addColorStop(1, "#06140c");
+      g.fillStyle = orb;
       g.beginPath();
       g.arc(cx + ox, oy, r, 0, 7);
       g.fill();
-    }
-    // cables
-    g.strokeStyle = "#1a2a1e";
-    g.lineWidth = 5;
-    for (const s of [-1, 1]) {
+      g.strokeStyle = "rgba(235,255,240,0.5)";
+      g.lineWidth = 1.2;
       g.beginPath();
-      g.moveTo(cx + s * 40, 60);
-      g.bezierCurveTo(cx + s * 66, 80, cx + s * 50, 110, cx + s * 58, 134);
+      g.arc(cx + ox, oy, r - 1.2, Math.PI * 1.05, Math.PI * 1.6);
       g.stroke();
-    }
-    g.strokeStyle = "#2c4a34";
-    g.lineWidth = 2;
-    for (const s of [-1, 1]) {
+      g.fillStyle = "rgba(255,255,255,0.95)";
       g.beginPath();
-      g.moveTo(cx + s * 40, 60);
-      g.bezierCurveTo(cx + s * 66, 80, cx + s * 50, 110, cx + s * 58, 134);
-      g.stroke();
+      g.arc(cx + ox - r * 0.3, oy - r * 0.35, r * 0.14, 0, 7);
+      g.fill();
     }
-    // vents and plate lines
-    g.fillStyle = "rgba(0,0,0,0.45)";
-    g.fillRect(cx - 56, 78, 112, 6);
-    g.fillRect(cx - 62, 110, 124, 6);
-    g.fillStyle = "#0a140c";
-    for (let i = 0; i < 4; i++) g.fillRect(cx - 20 + i * 12, 90, 7, 14);
-    // base
-    g.fillStyle = "#142018";
-    g.fillRect(cx - 70, 130, 140, 40);
-    glove(g, cx - 62, 144, 19, 15, -0.4);
-    glove(g, cx + 62, 150, 20, 16, 0.5, true);
+    // heavy cables with clamps
+    for (const s of [-1, 1]) {
+      g.strokeStyle = "#0a120c";
+      g.lineWidth = 7;
+      g.beginPath();
+      g.moveTo(cx + s * 46, 64);
+      g.bezierCurveTo(cx + s * 74, 86, cx + s * 56, 112, cx + s * 66, 136);
+      g.stroke();
+      g.strokeStyle = "#2c4a34";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(cx + s * 46, 64);
+      g.bezierCurveTo(cx + s * 74, 86, cx + s * 56, 112, cx + s * 66, 136);
+      g.stroke();
+      g.fillStyle = "#39414e";
+      g.fillRect(cx + s * 62 - 4, 88, 8, 6);
+      g.fillRect(cx + s * 58 - 4, 116, 8, 6);
+    }
+    // base block
+    g.fillStyle = cyl(g, cx - 80, cx + 80, ["#04060a", "#101e16", "#1d3424", "#16281c", "#070d09"]);
+    g.fillRect(cx - 78, 130, 156, 40);
+    g.fillStyle = "rgba(190,235,200,0.1)";
+    g.fillRect(cx - 78, 130, 156, 2);
+    tacticalHand(g, cx - 64, 148, 1.3, -0.35);
+    tacticalHand(g, cx + 66, 152, 1.4, 0.4);
   });
   return { c, w, h, mx: 120, my: 14 };
 })();
