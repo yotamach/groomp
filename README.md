@@ -19,6 +19,21 @@ python3 -m http.server 8000
 
 Click the screen to start (this also grabs the mouse pointer).
 
+## Desktop app
+
+The game also runs as a native desktop app via a thin Electron shell
+(`desktop/main.cjs` — the game code is identical):
+
+```sh
+npm install
+npm start        # launch the desktop app
+npm run dist     # build a real installer into dist/
+```
+
+`npm run dist` produces a Windows installer (NSIS), a macOS `.dmg`, or a
+Linux AppImage, depending on the platform you run it on. In the app,
+`F11` toggles fullscreen and `Esc` leaves it.
+
 ## Controls
 
 | Input | Action |
