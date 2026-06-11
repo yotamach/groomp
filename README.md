@@ -26,17 +26,35 @@ Click the screen to start (this also grabs the mouse pointer).
 | `W` `A` `S` `D` | Move / strafe |
 | Mouse / `←` `→` | Turn |
 | Click / `Space` | Shoot |
+| `1`–`7` / wheel | Switch weapon |
 | `Shift` | Run |
 | `M` | Toggle map |
 | `N` | Toggle music |
 | `R` | Restart |
 
-## Goal
+## The arsenal
 
-Blast your way through the brick halls, the stone gallery, and the slime den,
-take down the Groompfather, and step onto the glowing green exit pad. Medkits
-heal 25, ammo clips hold 10. Watch out for the purple spitters — they shoot
-back.
+You start with the mallet and the blaster; the other five are lost somewhere
+in the Groomplex.
+
+1. **Mallet** — spiked, silent, always loaded
+2. **Blaster** — infinite energy sidearm
+3. **Shotgun** — seven pellets of opinion (shells)
+4. **Chaingun** — hold the trigger and pray (bullets)
+5. **Rocket launcher** — splash damage works both ways (rockets)
+6. **Plasma rifle** — rapid green bolts (cells)
+7. **GBFG** — deletes rooms, drinks 40 cells per shot
+
+## The bestiary
+
+Groomps and spitters are the least of your problems now: wraiths drift
+through the dark, skitterlings hunt in packs, brutes soak whole clips,
+watchers spit from the air, hollows lunge with bone claws, maws are mostly
+teeth, husks throw fire, and if a shrieker sees you first, everything else
+will hear about it. The Groompfather waits at the end.
+
+Take down what you can, step onto the glowing green exit pad. Medkits heal
+25; ammo caches top up every pool. Toxic barrels explode — for both sides.
 
 ## How it works
 

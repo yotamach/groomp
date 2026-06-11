@@ -26,33 +26,37 @@ const zbuf = new Float32Array(W);
 const MAP_STR = [
   "########################################",
   "#.........#.................#..........#",
-  "#....a....#.........a.....b.#........h.#",
-  "#..P......#....%.......%....#........b.#",
-  "#....l.............l........#.....l....#",
-  "#..................g.....g.......s.....#",
-  "#.......b.#.............k..............#",
-  "#......k..#....%.......%....#....k.....#",
-  "###########.h............g..#..........#",
-  "###########.................#.b.....s..#",
-  "##################..#########..a.......#",
-  "##################..#########..........#",
+  "#....a....#.........a.....b.#....c...h.#",
+  "#..P......#....%.c...c.%....#........b.#",
+  "#....l.......3.....l........#.....l....#",
+  "#.........a........g.....g.....q.s..f..#",
+  "#.......b.#.....o....h..k..............#",
+  "#......k..#....%.......%....#....k.w...#",
+  "###########.h.......m....g..#.....a....#",
+  "###########...e.............#.b.....s..#",
+  "##################6.#########..a...4...#",
+  "##################q.#########......o...#",
   "##################l.#########&&&&&&&&&&&",
   "##################..####################",
-  "#.k....=.........................#######",
+  "#.k....=.....................a...#######",
   "#..a...=.h......................a#######",
   "#...l..=....g...............g.b..#######",
-  "#......=.........................#######",
-  "#X............k.....a............#######",
-  "#X..B........l............l......#######",
-  "#X.....=.........................#######",
-  "#....b.=.........................#######",
-  "#......=..s.........g...b.....s..#######",
-  "#..h...=.b.................k.....#######",
+  "#......=..u.5...........w.......h#######",
+  "#X..h......f..k.....a..a.....e...#######",
+  "#X..B........l......u.....l......#######",
+  "#X.w...=.........................#######",
+  "#....b.=.......c............m....#######",
+  "#.7....=..s.....c...g...b.....s..#######",
+  "#..h...=.b.....a...........k.....#######",
   "#......=.......................h.#######",
   "########################################",
 ];
 
 const WALL_CHARS = { "#": 1, "%": 2, "=": 3, "&": 4 };
+const ENEMY_CHARS = {
+  g: "groomp", s: "spitter", B: "boss", w: "wraith", c: "skitter",
+  u: "brute", e: "watcher", o: "hollow", m: "maw", f: "husk", q: "shrieker",
+};
 const EXIT_CELL = 9;
 
 let MW = 0, MH = MAP_STR.length;
@@ -60,7 +64,7 @@ for (const r of MAP_STR) MW = Math.max(MW, r.length);
 const grid = new Uint8Array(MW * MH);
 const startSpawns = {
   player: { x: 2.5, y: 2.5 },
-  enemies: [], pickups: [], barrels: [], lamps: [], skulls: [],
+  enemies: [], pickups: [], barrels: [], lamps: [], skulls: [], weapons: [],
 };
 
 for (let y = 0; y < MH; y++) {
@@ -72,9 +76,8 @@ for (let y = 0; y < MH; y++) {
     grid[y * MW + x] = 0;
     const sx = x + 0.5, sy = y + 0.5;
     if (ch === "P") startSpawns.player = { x: sx, y: sy };
-    else if (ch === "g") startSpawns.enemies.push({ x: sx, y: sy, type: "groomp" });
-    else if (ch === "s") startSpawns.enemies.push({ x: sx, y: sy, type: "spitter" });
-    else if (ch === "B") startSpawns.enemies.push({ x: sx, y: sy, type: "boss" });
+    else if (ENEMY_CHARS[ch]) startSpawns.enemies.push({ x: sx, y: sy, type: ENEMY_CHARS[ch] });
+    else if (ch >= "3" && ch <= "7") startSpawns.weapons.push({ x: sx, y: sy, slot: +ch });
     else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
     else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
     else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
@@ -165,16 +168,40 @@ function los(x0, y0, x1, y1) {
 // ---------------------------------------------------------------- state
 
 const ENEMY_STATS = {
-  groomp:  { hp: 60,  speed: 2.3, scale: 1.0,  r: 0.32, melee: 12, spit: 0,  ranged: false },
-  spitter: { hp: 42,  speed: 1.7, scale: 0.92, r: 0.30, melee: 0,  spit: 9,  ranged: true },
-  boss:    { hp: 320, speed: 1.5, scale: 1.55, r: 0.45, melee: 22, spit: 14, ranged: true },
+  groomp:   { hp: 60,  speed: 2.3, scale: 1.0,  r: 0.32, melee: 12, spit: 0,  ranged: false },
+  spitter:  { hp: 42,  speed: 1.7, scale: 0.92, r: 0.30, melee: 0,  spit: 9,  ranged: true, proj: "spit" },
+  boss:     { hp: 550, speed: 1.6, scale: 1.55, r: 0.45, melee: 24, spit: 16, ranged: true, proj: "spit" },
+  wraith:   { hp: 55,  speed: 3.1, scale: 0.95, r: 0.30, melee: 14, spit: 0,  ranged: false, hover: true },
+  skitter:  { hp: 18,  speed: 4.2, scale: 0.55, r: 0.22, melee: 6,  spit: 0,  ranged: false },
+  brute:    { hp: 220, speed: 1.2, scale: 1.45, r: 0.42, melee: 28, spit: 0,  ranged: false },
+  watcher:  { hp: 70,  speed: 1.9, scale: 0.80, r: 0.28, melee: 0,  spit: 12, ranged: true, proj: "spit", hover: true },
+  hollow:   { hp: 80,  speed: 2.6, scale: 1.05, r: 0.30, melee: 16, spit: 0,  ranged: false },
+  maw:      { hp: 130, speed: 2.9, scale: 1.10, r: 0.36, melee: 24, spit: 0,  ranged: false },
+  husk:     { hp: 60,  speed: 2.0, scale: 1.0,  r: 0.30, melee: 0,  spit: 13, ranged: true, proj: "fire" },
+  shrieker: { hp: 45,  speed: 2.4, scale: 1.0,  r: 0.30, melee: 10, spit: 0,  ranged: false, scream: true },
 };
 
-const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, ammo: 24, r: 0.25 };
+const player = { x: 2.5, y: 2.5, ang: 0, hp: 100, r: 0.25 };
 let dirX = 1, dirY = 0, planeX = 0, planeY = FOV;
 
+// the arsenal: slots 1-7, switched with the number keys
+const WEAPONS = {
+  1: { name: "MALLET",   rate: 0.45, melee: { range: 1.5, dmg: 55 } },
+  2: { name: "BLASTER",  rate: 0.32, pellets: 1, spread: 0,     dmg: 30, dmgVar: 12 },
+  3: { name: "SHOTGUN",  rate: 0.95, pellets: 7, spread: 0.10,  dmg: 9,  dmgVar: 6, ammo: "shells", use: 1 },
+  4: { name: "CHAINGUN", rate: 0.09, pellets: 1, spread: 0.035, dmg: 11, dmgVar: 8, ammo: "bullets", use: 1 },
+  5: { name: "ROCKETS",  rate: 0.85, proj: { kind: "rocket", speed: 9,   dmg: 30,  blast: { r: 2.0, dmg: 110 } }, ammo: "rockets", use: 1 },
+  6: { name: "PLASMA",   rate: 0.13, proj: { kind: "plasma", speed: 12,  dmg: 24 }, ammo: "cells", use: 1 },
+  7: { name: "GBFG",     rate: 1.6,  proj: { kind: "gbfg",   speed: 6.5, dmg: 130, blast: { r: 3.4, dmg: 360 } }, ammo: "cells", use: 40 },
+};
+const AMMO_MAX = { bullets: 200, shells: 50, rockets: 25, cells: 150 };
+let ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
+let owned = {};
+let curGun = 2;
+let swingT = 0;
+
 let state = "title"; // title | playing | dead | won
-let enemies = [], pickups = [], projectiles = [];
+let enemies = [], pickups = [], projectiles = [], wpickups = [];
 let barrels = [], explosions = [], particles = [];
 let totalEnemies = 0, kills = 0;
 let startTime = 0, winTime = 0, now = 0;
@@ -190,17 +217,22 @@ function reset() {
   player.y = startSpawns.player.y;
   player.ang = 0;
   player.hp = 100;
-  player.ammo = 24;
+  ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
+  owned = { 1: true, 2: true };
+  curGun = 2;
+  swingT = 0;
   enemies = startSpawns.enemies.map(s => {
     const st = ENEMY_STATS[s.type];
     return {
       type: s.type, x: s.x, y: s.y, hp: st.hp, speed: st.speed, scale: st.scale,
       r: st.r, melee: st.melee, spit: st.spit, ranged: st.ranged,
+      proj: st.proj, hover: st.hover, scream: st.scream,
       state: "idle", animT: Math.random() * 9, cool: 0, atkT: 0, painT: 0,
       deadT: 0, rangedAttack: false,
     };
   });
   pickups = startSpawns.pickups.map(p => ({ ...p }));
+  wpickups = startSpawns.weapons.map(p => ({ ...p }));
   projectiles = [];
   barrels = startSpawns.barrels.map(b => ({ ...b, hp: 25, alive: true, fuse: -1 }));
   explosions = [];
@@ -222,6 +254,23 @@ addEventListener("keydown", e => {
   if (e.code === "KeyM") showMap = !showMap;
   if (e.code === "KeyN" && typeof Sfx !== "undefined") flash(Sfx.toggleMusic() ? "Music on." : "Music off.");
   if (e.code === "KeyR" && state !== "title") { reset(); state = "playing"; }
+  if (e.code.startsWith("Digit")) {
+    const slot = +e.code.slice(5);
+    if (slot >= 1 && slot <= 7 && owned[slot] && slot !== curGun && state === "playing") {
+      curGun = slot;
+      muzzle = 0;
+      shootCool = Math.max(shootCool, 0.18);
+    }
+  }
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (state !== "playing") return;
+  const d = e.deltaY > 0 ? 1 : -1;
+  for (let i = 1; i <= 7; i++) {
+    const slot = ((curGun - 1 + d * i) % 7 + 7) % 7 + 1;
+    if (owned[slot]) { curGun = slot; shootCool = Math.max(shootCool, 0.18); break; }
+  }
 });
 addEventListener("keyup", e => { keys[e.code] = false; });
 
@@ -281,26 +330,29 @@ function spawnParticles(x, y, u, kind, n, spd) {
   }
 }
 
-function explodeBarrel(b) {
-  if (!b.alive) return;
-  b.alive = false;
-  explosions.push({ x: b.x, y: b.y, t: 0 });
-  spawnParticles(b.x, b.y, 0.3, "spark", 14, 2.4);
-  spawnParticles(b.x, b.y, 0.2, "goo", 8, 1.8);
+function explodeAt(x, y, r, dmgMax, scale = 1.25) {
+  explosions.push({ x, y, t: 0, scale });
+  spawnParticles(x, y, 0.3, "spark", 10 + r * 4 | 0, 1.6 + r * 0.5);
   Sfx.boom();
-  const pd = Math.hypot(player.x - b.x, player.y - b.y);
-  if (pd < 2.2) damagePlayer(Math.round(34 * (1 - pd / 2.6)));
+  const pd = Math.hypot(player.x - x, player.y - y);
+  if (pd < r) damagePlayer(Math.max(1, Math.round(dmgMax * 0.4 * (1 - pd / (r + 0.4)))));
   for (const e of enemies) {
     if (e.state === "dead") continue;
-    const d = Math.hypot(e.x - b.x, e.y - b.y);
-    if (d < 2.4) damageEnemy(e, Math.round(95 * (1 - d / 3)));
+    const d = Math.hypot(e.x - x, e.y - y);
+    if (d < r + 0.4) damageEnemy(e, Math.max(1, Math.round(dmgMax * (1 - d / (r + 0.8)))));
   }
   for (const b2 of barrels) {
-    if (b2.alive && b2 !== b && b2.fuse < 0
-        && Math.hypot(b2.x - b.x, b2.y - b.y) < 1.9) {
+    if (b2.alive && b2.fuse < 0 && Math.hypot(b2.x - x, b2.y - y) < r * 0.95) {
       b2.fuse = 0.12 + Math.random() * 0.15;
     }
   }
+}
+
+function explodeBarrel(b) {
+  if (!b.alive) return;
+  b.alive = false;
+  spawnParticles(b.x, b.y, 0.2, "goo", 8, 1.8);
+  explodeAt(b.x, b.y, 2.2, 95);
 }
 
 function damageEnemy(e, dmg) {
@@ -323,56 +375,99 @@ function damageEnemy(e, dmg) {
   }
 }
 
-function tryShoot() {
-  if (shootCool > 0) return;
-  if (player.ammo <= 0) { Sfx.empty(); shootCool = 0.3; return; }
-  player.ammo--;
-  shootCool = 0.32;
-  muzzle = 0.08;
-  recoil = 1;
-  Sfx.shoot();
-  // gunfire wakes anything close enough to hear it
+function hitBarrel(b, dmg) {
+  b.hp -= dmg;
+  spawnParticles(b.x, b.y, 0.4, "spark", 4, 1.4);
+  if (b.hp <= 0) explodeBarrel(b);
+}
+
+// one hitscan ray, rotated `off` radians from the view direction
+function hitscanPellet(off, dmg) {
+  const ca = Math.cos(off), sa = Math.sin(off);
+  const rdx = dirX * ca - dirY * sa;
+  const rdy = dirX * sa + dirY * ca;
+  let best = null, bestD = Infinity, bestEnemy = false;
+  const consider = (x, y, width, obj, isEnemy) => {
+    const relX = x - player.x, relY = y - player.y;
+    const depth = relX * rdx + relY * rdy;
+    if (depth < 0.2 || depth >= bestD) return;
+    if (Math.abs(relX * rdy - relY * rdx) > width) return; // perp distance to ray
+    if (!los(player.x, player.y, x, y)) return;
+    best = obj;
+    bestD = depth;
+    bestEnemy = isEnemy;
+  };
   for (const e of enemies) {
-    if (e.state === "idle" && Math.hypot(e.x - player.x, e.y - player.y) < 8) e.state = "chase";
-  }
-  // hitscan: nearest target whose billboard covers screen centre
-  let best = null, bestT = Infinity;
-  const targets = [];
-  for (const e of enemies) {
-    if (e.state !== "dead") targets.push({ x: e.x, y: e.y, scale: e.scale, enemy: e });
+    if (e.state !== "dead") consider(e.x, e.y, 0.34 * e.scale, e, true);
   }
   for (const b of barrels) {
-    if (b.alive) targets.push({ x: b.x, y: b.y, scale: 0.55, barrel: b });
+    if (b.alive) consider(b.x, b.y, 0.3, b, false);
   }
-  for (const t of targets) {
-    const relX = t.x - player.x, relY = t.y - player.y;
-    const invDet = 1 / (planeX * dirY - dirX * planeY);
-    const tx = invDet * (dirY * relX - dirX * relY);
-    const ty = invDet * (-planeY * relX + planeX * relY);
-    if (ty < 0.15 || ty >= bestT) continue;
-    const screenX = (W / 2) * (1 + tx / ty);
-    const halfW = (H / ty) * t.scale * 0.3;
-    if (Math.abs(screenX - W / 2) > halfW) continue;
-    if (!los(player.x, player.y, t.x, t.y)) continue;
-    best = t;
-    bestT = ty;
+  if (!best) return;
+  if (bestEnemy) damageEnemy(best, dmg);
+  else hitBarrel(best, dmg);
+}
+
+function meleeSwing(range, dmg) {
+  Sfx.swing();
+  swingT = 0.28;
+  let best = null, bestD = Infinity, bestEnemy = false;
+  const consider = (x, y, obj, isEnemy) => {
+    const relX = x - player.x, relY = y - player.y;
+    const depth = relX * dirX + relY * dirY;
+    if (depth < 0 || depth > range || depth >= bestD) return;
+    if (Math.abs(relX * dirY - relY * dirX) > 0.7) return;
+    best = obj;
+    bestD = depth;
+    bestEnemy = isEnemy;
+  };
+  for (const e of enemies) {
+    if (e.state !== "dead") consider(e.x, e.y, e, true);
   }
-  if (best) {
-    if (best.enemy) damageEnemy(best.enemy, 30 + (Math.random() * 12 | 0));
-    else {
-      best.barrel.hp -= 34;
-      spawnParticles(best.barrel.x, best.barrel.y, 0.4, "spark", 4, 1.4);
-      if (best.barrel.hp <= 0) explodeBarrel(best.barrel);
-    }
+  for (const b of barrels) {
+    if (b.alive) consider(b.x, b.y, b, false);
+  }
+  if (!best) return;
+  Sfx.thunk();
+  if (bestEnemy) damageEnemy(best, dmg + (Math.random() * 15 | 0));
+  else hitBarrel(best, dmg);
+}
+
+function tryShoot() {
+  if (shootCool > 0) return;
+  const Wp = WEAPONS[curGun];
+  if (Wp.ammo && ammoPool[Wp.ammo] < Wp.use) { Sfx.empty(); shootCool = 0.3; return; }
+  shootCool = Wp.rate;
+  recoil = 1;
+  if (Wp.melee) { meleeSwing(Wp.melee.range, Wp.melee.dmg); return; }
+  if (Wp.ammo) ammoPool[Wp.ammo] -= Wp.use;
+  muzzle = 0.07;
+  Sfx.fire(curGun);
+  // gunfire wakes anything close enough to hear it
+  for (const e of enemies) {
+    if (e.state === "idle" && Math.hypot(e.x - player.x, e.y - player.y) < 9) e.state = "chase";
+  }
+  if (Wp.proj) {
+    projectiles.push({
+      x: player.x + dirX * 0.5, y: player.y + dirY * 0.5,
+      dx: dirX * Wp.proj.speed, dy: dirY * Wp.proj.speed,
+      dmg: Wp.proj.dmg, kind: Wp.proj.kind, blast: Wp.proj.blast, hostile: false,
+    });
+    return;
+  }
+  for (let i = 0; i < Wp.pellets; i++) {
+    hitscanPellet((Math.random() - 0.5) * 2 * Wp.spread, Wp.dmg + (Math.random() * Wp.dmgVar | 0));
   }
 }
 
 function spawnSpit(e) {
   const dx = player.x - e.x, dy = player.y - e.y;
   const d = Math.hypot(dx, dy) || 1;
+  const speed = e.proj === "fire" ? 4.6 : 5.2;
   projectiles.push({
     x: e.x + (dx / d) * 0.5, y: e.y + (dy / d) * 0.5,
-    dx: (dx / d) * 5.2, dy: (dy / d) * 5.2, dmg: e.spit,
+    dx: (dx / d) * speed, dy: (dy / d) * speed,
+    dmg: e.spit, kind: e.proj || "spit", hostile: true,
   });
   Sfx.spit();
 }
@@ -387,7 +482,18 @@ function updateEnemy(e, dt) {
   e.cool -= dt;
 
   if (e.state === "idle") {
-    if (seen && dist < 10) { e.state = "chase"; Sfx.growl(); }
+    if (seen && dist < 10) {
+      e.state = "chase";
+      if (e.scream) {
+        // the shriek wakes everything nearby
+        Sfx.scream();
+        for (const o of enemies) {
+          if (o.state === "idle" && Math.hypot(o.x - e.x, o.y - e.y) < 11) o.state = "chase";
+        }
+      } else {
+        Sfx.growl();
+      }
+    }
     return;
   }
   if (e.state === "pain") {
@@ -454,6 +560,7 @@ function update(dt) {
 
   shootCool = Math.max(0, shootCool - dt);
   muzzle = Math.max(0, muzzle - dt);
+  swingT = Math.max(0, swingT - dt);
   recoil = Math.max(0, recoil - dt * 6);
   damageFlash = Math.max(0, damageFlash - dt * 1.6);
   pickupFlash = Math.max(0, pickupFlash - dt * 3);
@@ -517,12 +624,35 @@ function update(dt) {
     const p = projectiles[i];
     p.x += p.dx * dt;
     p.y += p.dy * dt;
-    if (isWall(cellAt(Math.floor(p.x), Math.floor(p.y)))) {
-      projectiles.splice(i, 1);
-      continue;
+    let hit = isWall(cellAt(Math.floor(p.x), Math.floor(p.y)));
+    if (!hit) {
+      if (p.hostile) {
+        if (Math.hypot(p.x - player.x, p.y - player.y) < 0.4) {
+          damagePlayer(p.dmg);
+          hit = true;
+        }
+      } else {
+        for (const e of enemies) {
+          if (e.state === "dead") continue;
+          if (Math.hypot(p.x - e.x, p.y - e.y) < e.r + 0.25) {
+            damageEnemy(e, p.dmg);
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) {
+          for (const b of barrels) {
+            if (b.alive && Math.hypot(p.x - b.x, p.y - b.y) < 0.5) {
+              hitBarrel(b, p.dmg);
+              hit = true;
+              break;
+            }
+          }
+        }
+      }
     }
-    if (Math.hypot(p.x - player.x, p.y - player.y) < 0.4) {
-      damagePlayer(p.dmg);
+    if (hit) {
+      if (p.blast) explodeAt(p.x, p.y, p.blast.r, p.blast.dmg, p.kind === "gbfg" ? 2.4 : 1.25);
       projectiles.splice(i, 1);
     }
   }
@@ -535,12 +665,28 @@ function update(dt) {
       player.hp = Math.min(100, player.hp + 25);
       flash("Picked up a medkit.");
     } else {
-      if (player.ammo >= 99) continue;
-      player.ammo = Math.min(99, player.ammo + 10);
-      flash("Picked up a clip of groomp-stoppers.");
+      ammoPool.bullets = Math.min(AMMO_MAX.bullets, ammoPool.bullets + 20);
+      ammoPool.shells = Math.min(AMMO_MAX.shells, ammoPool.shells + 4);
+      ammoPool.rockets = Math.min(AMMO_MAX.rockets, ammoPool.rockets + 1);
+      ammoPool.cells = Math.min(AMMO_MAX.cells, ammoPool.cells + 20);
+      flash("Picked up an ammo cache.");
     }
     pickups.splice(i, 1);
     pickupFlash = 0.5;
+    Sfx.pickup();
+  }
+
+  const WEAPON_GRANT = { 3: ["shells", 10], 4: ["bullets", 60], 5: ["rockets", 6], 6: ["cells", 50], 7: ["cells", 40] };
+  for (let i = wpickups.length - 1; i >= 0; i--) {
+    const p = wpickups[i];
+    if (Math.hypot(p.x - player.x, p.y - player.y) > 0.7) continue;
+    owned[p.slot] = true;
+    const [type, amt] = WEAPON_GRANT[p.slot];
+    ammoPool[type] = Math.min(AMMO_MAX[type], ammoPool[type] + amt);
+    curGun = p.slot;
+    flash(`You got the ${WEAPONS[p.slot].name}!`);
+    wpickups.splice(i, 1);
+    pickupFlash = 0.6;
     Sfx.pickup();
   }
 
@@ -694,20 +840,27 @@ function enemyTexture(e) {
 }
 
 const PART_TEX = { blood: PART_BLOOD, spark: PART_SPARK, goo: PART_GOO };
+const PROJ_TEX = { spit: SPR_SPIT, fire: SPR_FIRE, plasma: SPR_PLASMA, rocket: SPR_ROCKETP, gbfg: SPR_GBFG };
 
 function renderSprites() {
   const px = player.x, py = player.y;
   const list = [];
-  for (const e of enemies) list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u: 0 });
+  for (const e of enemies) {
+    const u = e.hover && e.state !== "dead" ? 0.08 + 0.05 * Math.sin(now * 2.6 + e.animT * 4) : 0;
+    list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u });
+  }
   for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : SPR_AMMO, scale: 0.55, u: 0 });
-  for (const p of projectiles) list.push({ x: p.x, y: p.y, tex: SPR_SPIT, scale: 0.3, u: 0.3, glow: true });
+  for (const p of wpickups) list.push({ x: p.x, y: p.y, tex: SPR_WPICK[p.slot], scale: 0.6, u: 0, glow: true });
+  for (const p of projectiles) {
+    list.push({ x: p.x, y: p.y, tex: PROJ_TEX[p.kind] || SPR_SPIT, scale: p.kind === "gbfg" ? 0.55 : 0.3, u: 0.3, glow: true });
+  }
   for (const b of barrels) {
     if (b.alive) list.push({ x: b.x, y: b.y, tex: SPR_BARREL, scale: 0.62, u: 0 });
   }
   for (const L of startSpawns.lamps) list.push({ x: L.x, y: L.y, tex: SPR_LAMP, scale: 0.42, u: 0.58, glow: true });
   for (const k of startSpawns.skulls) list.push({ x: k.x, y: k.y, tex: SPR_SKULLS, scale: 0.34, u: 0 });
   for (const ex of explosions) {
-    list.push({ x: ex.x, y: ex.y, tex: SPR_EXPLOSION[Math.min(2, (ex.t * 7) | 0)], scale: 1.25, u: 0.05, glow: true });
+    list.push({ x: ex.x, y: ex.y, tex: SPR_EXPLOSION[Math.min(2, (ex.t * 7) | 0)], scale: ex.scale || 1.25, u: 0.05, glow: true });
   }
   for (const p of particles) list.push({ x: p.x, y: p.y, tex: PART_TEX[p.kind], scale: 0.07, u: p.u, glow: p.kind === "spark" });
 
@@ -751,41 +904,62 @@ function renderSprites() {
 
 function drawWeapon() {
   if (state === "title") return;
+  const G = GUNS[curGun];
+  const green = curGun === 6 || curGun === 7;
   const bx = Math.sin(bobPhase) * 10 * bobAmt;
   const by = Math.abs(Math.cos(bobPhase)) * 8 * bobAmt + recoil * 26;
   // gun sits slightly right of centre, Doom style, bottom quarter of the view
   const GS = 0.82;
-  const gw = WEAPON_W * GS, gh = WEAPON_H * GS;
+  const gw = G.w * GS, gh = G.h * GS;
   const gx = LW / 2 + 18 + bx - gw / 2;
   const gy = LH - HUD_H + 34 + by - gh;
-  const mx = gx + gw / 2, myz = gy + 14 * GS; // muzzle point
+  const mx = gx + G.mx * GS, myz = gy + G.my * GS; // muzzle point
 
   if (muzzle > 0) {
     // outer glow behind the gun
-    const r = 40 + Math.random() * 14;
+    const r = (curGun === 5 || curGun === 7 ? 54 : 40) + Math.random() * 14;
     const glow = ctx.createRadialGradient(mx, myz, 3, mx, myz, r);
-    glow.addColorStop(0, "rgba(255,244,190,0.95)");
-    glow.addColorStop(0.45, "rgba(255,180,50,0.75)");
-    glow.addColorStop(1, "rgba(255,110,0,0)");
+    if (green) {
+      glow.addColorStop(0, "rgba(220,255,215,0.95)");
+      glow.addColorStop(0.45, "rgba(90,224,130,0.75)");
+      glow.addColorStop(1, "rgba(20,150,60,0)");
+    } else {
+      glow.addColorStop(0, "rgba(255,244,190,0.95)");
+      glow.addColorStop(0.45, "rgba(255,180,50,0.75)");
+      glow.addColorStop(1, "rgba(255,110,0,0)");
+    }
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(mx, myz, r, 0, 7);
     ctx.fill();
   }
 
-  ctx.drawImage(WEAPON_CANVAS, gx, gy, gw, gh);
+  if (curGun === 1) {
+    // mallet swings around a pivot at its base
+    const sw = swingT > 0 ? Math.sin((0.28 - swingT) / 0.28 * Math.PI) : 0;
+    ctx.save();
+    ctx.translate(gx + gw / 2 + 30, gy + gh + 20);
+    ctx.rotate(-sw * 1.25);
+    ctx.translate(-sw * 26, sw * 6);
+    ctx.drawImage(G.c, -gw / 2 - 30, -gh - 20, gw, gh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(G.c, gx, gy, gw, gh);
+  }
 
-  // live energy cell glow
-  const pulse = 0.55 + 0.45 * Math.sin(now * 7);
-  ctx.fillStyle = `rgba(60,224,106,${0.35 + pulse * 0.55})`;
-  ctx.fillRect(gx + (WEAPON_CELL.x + 2) * GS, gy + (WEAPON_CELL.y + 2) * GS, (WEAPON_CELL.w - 4) * GS * (0.3 + 0.7 * Math.min(1, player.ammo / 40)), (WEAPON_CELL.h - 4) * GS);
+  if (G.cell) {
+    // blaster's live energy cell pulse
+    const pulse = 0.55 + 0.45 * Math.sin(now * 7);
+    ctx.fillStyle = `rgba(60,224,106,${0.35 + pulse * 0.55})`;
+    ctx.fillRect(gx + (G.cell.x + 2) * GS, gy + (G.cell.y + 2) * GS, (G.cell.w - 4) * GS, (G.cell.h - 4) * GS);
+  }
 
   if (muzzle > 0) {
     // starburst core in front of the muzzle
     ctx.save();
     ctx.translate(mx, myz);
     ctx.rotate(Math.random() * 6.283);
-    ctx.fillStyle = "rgba(255,250,210,0.95)";
+    ctx.fillStyle = green ? "rgba(225,255,225,0.95)" : "rgba(255,250,210,0.95)";
     for (let i = 0; i < 4; i++) {
       ctx.rotate(Math.PI / 4);
       ctx.beginPath();
@@ -962,10 +1136,17 @@ function drawHud() {
   meter(P.health.cx, player.hp / 100, hpCol);
   label("HEALTH", P.health.cx);
 
-  const amCol = player.ammo > 8 ? "#e0c63f" : "#e03f3f";
-  led(`${player.ammo}`, P.ammo.cx, amCol, 26);
-  meter(P.ammo.cx, player.ammo / 60, amCol);
-  label("AMMO", P.ammo.cx);
+  const Wp = WEAPONS[curGun];
+  if (Wp.ammo) {
+    const val = ammoPool[Wp.ammo];
+    const amCol = val >= Wp.use * 8 ? "#e0c63f" : "#e03f3f";
+    led(`${val}`, P.ammo.cx, amCol, 26);
+    meter(P.ammo.cx, val / AMMO_MAX[Wp.ammo], amCol);
+  } else {
+    led("∞", P.ammo.cx, "#e0c63f", 26);
+    meter(P.ammo.cx, 1, "#e0c63f");
+  }
+  label(Wp.name, P.ammo.cx);
 
   drawFace(P.face.cx, top + 30, player.hp / 100);
 
@@ -973,33 +1154,25 @@ function drawHud() {
   meter(P.kills.cx, kills / totalEnemies, "#e08f3f");
   label("GROOMPS", P.kills.cx);
 
-  // keycap hints
-  const keycap = (key, desc, row) => {
-    const y = top + 13 + row * 14;
-    const x = P.hints.x + 10;
-    ctx.fillStyle = "#101216";
-    ctx.fillRect(x, y + 1.5, 13, 11);
-    const kg = ctx.createLinearGradient(0, y, 0, y + 11);
-    kg.addColorStop(0, "#4a505e");
-    kg.addColorStop(1, "#2c313c");
+  // ARMS panel: weapon slots 1-7
+  for (let s = 1; s <= 7; s++) {
+    const x = P.hints.x + 7 + (s - 1) * 16.5;
+    const y = top + 16;
+    const own = owned[s], cur = s === curGun;
+    ctx.fillStyle = "#0a0c10";
+    ctx.fillRect(x, y + 1.5, 14, 14);
+    const kg = ctx.createLinearGradient(0, y, 0, y + 14);
+    kg.addColorStop(0, cur ? "#2e6a3c" : own ? "#4a505e" : "#1e2126");
+    kg.addColorStop(1, cur ? "#1a4226" : own ? "#2c313c" : "#13151a");
     ctx.fillStyle = kg;
-    ctx.fillRect(x, y, 13, 11);
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillRect(x, y, 13, 1.2);
-    ctx.font = "bold 8px monospace";
-    ctx.fillStyle = "#e8e8ee";
-    ctx.fillText(key, x + 6.5, y + 8);
-    ctx.font = "8px monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "rgba(0,0,0,0.9)";
-    ctx.fillText(desc, x + 18, y + 8);
-    ctx.fillStyle = "rgba(190,200,215,0.5)";
-    ctx.fillText(desc, x + 18, y + 9);
-    ctx.textAlign = "center";
-  };
-  keycap("M", "MAP", 0);
-  keycap("N", "MUSIC", 1);
-  keycap("R", "RESTART", 2);
+    ctx.fillRect(x, y, 14, 14);
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(x, y, 14, 1.2);
+    ctx.font = "bold 9px monospace";
+    ctx.fillStyle = cur ? "#b8f0c8" : own ? "#e8d88a" : "#43464e";
+    ctx.fillText(s, x + 7, y + 10.5);
+  }
+  label("ARSENAL", P.hints.cx);
 }
 
 function drawMinimap() {
@@ -1129,11 +1302,13 @@ function render() {
       title: "GROOMP",
       titleColor: "#e03f2a",
       body: [
-        "The Groomplex is overrun. One-eyed blobs ooze in the dark.",
-        "You have a blaster, bad intentions, and no backup.",
+        "The Groomplex is overrun. Things scuttle, float and shriek",
+        "in the dark. You have a blaster, bad intentions, and no backup.",
+        "Five more guns are lost somewhere inside. Find them.",
         "",
         "WASD move · mouse / arrows turn · click / space shoot",
-        "shift run · M map · N music · R restart",
+        "1-7 / wheel switch weapon · shift run",
+        "M map · N music · R restart",
       ],
       prompt: "CLICK TO ENTER THE GROOMPLEX",
     });
