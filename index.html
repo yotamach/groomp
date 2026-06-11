@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GROOMP</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0a0a0c;
+    height: 100%;
+    overflow: hidden;
+    font-family: monospace;
+  }
+  #wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+  #screen {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    width: min(96vw, calc(96vh * 1.6));
+    height: auto;
+    border: 4px solid #2a2a30;
+    border-radius: 4px;
+    box-shadow: 0 0 60px rgba(180, 30, 30, 0.25);
+    cursor: crosshair;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="screen" width="640" height="400"></canvas>
+</div>
+<script src="js/assets.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
