@@ -81,6 +81,11 @@ const Sfx = (() => {
       noiseBurst(0.3, 0.3, 700);
     },
     growl() { blip("sawtooth", 95, 55, 0.35, 0.3); },
+    boom() {
+      noiseBurst(0.5, 0.6, 900);
+      blip("sawtooth", 90, 24, 0.6, 0.55);
+      blip("square", 50, 18, 0.8, 0.4, 0.05);
+    },
     spit() { blip("sine", 750, 180, 0.22, 0.25); },
     hurt() {
       blip("sawtooth", 120, 50, 0.28, 0.5);

@@ -45,6 +45,10 @@ back.
 - **Floors & ceilings** — per-scanline floor casting.
 - **Enemies, pickups, projectiles** — z-buffered billboard sprites with a
   small state machine per enemy (idle → chase → attack / pain → dead).
+- **Lighting** — per-cell sector-style light levels with flickering cells,
+  bright pools under hanging lamps and around the exit pad.
+- **Set dressing** — hanging lamps, bone piles, blood particles, and
+  exploding toxic barrels that chain-react and hurt everything nearby.
 - **Art** — all textures and sprite frames are drawn onto offscreen canvases
   with the 2D API at load time (`js/assets.js`).
 - **Sound** — synthesized with WebAudio oscillators and noise buffers

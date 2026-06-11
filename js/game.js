@@ -21,32 +21,33 @@ const zbuf = new Float32Array(W);
 // ------------------------------------------------------------------ map
 // '#' brick  '%' stone  '=' tech  '&' slime  '.' floor  'X' exit pad
 // 'P' player  'g' groomp  's' spitter  'B' boss groomp  'h' medkit  'a' ammo
+// 'l' hanging lamp  'b' exploding barrel  'k' bone pile
 
 const MAP_STR = [
   "########################################",
   "#.........#.................#..........#",
-  "#....a....#.........a.......#........h.#",
-  "#..P......#....%.......%....#..........#",
-  "#...........................#..........#",
+  "#....a....#.........a.....b.#........h.#",
+  "#..P......#....%.......%....#........b.#",
+  "#....l.............l........#.....l....#",
   "#..................g.....g.......s.....#",
-  "#.........#............................#",
-  "#.........#....%.......%....#..........#",
+  "#.......b.#.............k..............#",
+  "#......k..#....%.......%....#....k.....#",
   "###########.h............g..#..........#",
-  "###########.................#.......s..#",
+  "###########.................#.b.....s..#",
   "##################..#########..a.......#",
   "##################..#########..........#",
-  "##################..#########&&&&&&&&&&&",
+  "##################l.#########&&&&&&&&&&&",
   "##################..####################",
-  "#......=.........................#######",
+  "#.k....=.........................#######",
   "#..a...=.h......................a#######",
-  "#......=....g...............g....#######",
+  "#...l..=....g...............g.b..#######",
   "#......=.........................#######",
-  "#X..................a............#######",
-  "#X..B............................#######",
+  "#X............k.....a............#######",
+  "#X..B........l............l......#######",
   "#X.....=.........................#######",
-  "#......=.........................#######",
-  "#......=..s.........g.........s..#######",
-  "#..h...=.........................#######",
+  "#....b.=.........................#######",
+  "#......=..s.........g...b.....s..#######",
+  "#..h...=.b.................k.....#######",
   "#......=.......................h.#######",
   "########################################",
 ];
@@ -57,7 +58,10 @@ const EXIT_CELL = 9;
 let MW = 0, MH = MAP_STR.length;
 for (const r of MAP_STR) MW = Math.max(MW, r.length);
 const grid = new Uint8Array(MW * MH);
-const startSpawns = { player: { x: 2.5, y: 2.5 }, enemies: [], pickups: [] };
+const startSpawns = {
+  player: { x: 2.5, y: 2.5 },
+  enemies: [], pickups: [], barrels: [], lamps: [], skulls: [],
+};
 
 for (let y = 0; y < MH; y++) {
   const row = MAP_STR[y];
@@ -73,7 +77,56 @@ for (let y = 0; y < MH; y++) {
     else if (ch === "B") startSpawns.enemies.push({ x: sx, y: sy, type: "boss" });
     else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
     else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
+    else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
+    else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
+    else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
   }
+}
+
+// ------------------------------------------------------------- lighting
+// Static per-cell light (sector feel): random variance, bright pools under
+// lamps and around the exit. A few cells flicker; lightNow is the per-frame
+// effective value.
+
+const lightGrid = new Float32Array(MW * MH);
+const flickerGrid = new Uint8Array(MW * MH);
+{
+  let s = 0xBADA55;
+  const rr = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < lightGrid.length; i++) {
+    lightGrid[i] = 0.68 + rr() * 0.3;
+    if (rr() < 0.05) flickerGrid[i] = 1 + (rr() * 6 | 0);
+  }
+  const boost = (cx, cy, amt) => {
+    for (let y = cy - 1; y <= cy + 1; y++) {
+      for (let x = cx - 1; x <= cx + 1; x++) {
+        if (x < 0 || y < 0 || x >= MW || y >= MH) continue;
+        const i = y * MW + x;
+        const a = (x === cx && y === cy) ? amt : amt * 0.55;
+        lightGrid[i] = Math.min(1.35, lightGrid[i] + a);
+      }
+    }
+  };
+  for (const L of startSpawns.lamps) {
+    boost(Math.floor(L.x), Math.floor(L.y), 0.5);
+    if (rr() < 0.5) flickerGrid[Math.floor(L.y) * MW + Math.floor(L.x)] = 1 + (rr() * 6 | 0);
+  }
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === EXIT_CELL) boost(i % MW, (i / MW) | 0, 0.45);
+  }
+}
+const lightNow = new Float32Array(MW * MH);
+function updateLights() {
+  for (let i = 0; i < lightNow.length; i++) {
+    const fl = flickerGrid[i];
+    lightNow[i] = fl
+      ? lightGrid[i] * (0.72 + 0.3 * (0.5 + 0.5 * Math.sin(now * 9 + fl * 1.7)))
+      : lightGrid[i];
+  }
+}
+function lightAt(cx, cy) {
+  if (cx < 0 || cy < 0 || cx >= MW || cy >= MH) return 0.8;
+  return lightNow[cy * MW + cx];
 }
 
 function cellAt(cx, cy) {
@@ -82,10 +135,17 @@ function cellAt(cx, cy) {
 }
 function isWall(c) { return c >= 1 && c <= 4; }
 function blockedAt(x, y, r) {
-  return isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
-      || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
-      || isWall(cellAt(Math.floor(x - r), Math.floor(y + r)))
-      || isWall(cellAt(Math.floor(x + r), Math.floor(y + r)));
+  if (isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
+   || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
+   || isWall(cellAt(Math.floor(x - r), Math.floor(y + r)))
+   || isWall(cellAt(Math.floor(x + r), Math.floor(y + r)))) return true;
+  for (let i = 0; i < barrels.length; i++) {
+    const b = barrels[i];
+    if (!b.alive) continue;
+    const dx = x - b.x, dy = y - b.y, rr = r + 0.3;
+    if (dx * dx + dy * dy < rr * rr) return true;
+  }
+  return false;
 }
 function tryMove(ent, dx, dy, r) {
   if (!blockedAt(ent.x + dx, ent.y, r)) ent.x += dx;
@@ -115,6 +175,7 @@ let dirX = 1, dirY = 0, planeX = 0, planeY = FOV;
 
 let state = "title"; // title | playing | dead | won
 let enemies = [], pickups = [], projectiles = [];
+let barrels = [], explosions = [], particles = [];
 let totalEnemies = 0, kills = 0;
 let startTime = 0, winTime = 0, now = 0;
 let shootCool = 0, muzzle = 0, recoil = 0, bobPhase = 0, bobAmt = 0;
@@ -141,6 +202,9 @@ function reset() {
   });
   pickups = startSpawns.pickups.map(p => ({ ...p }));
   projectiles = [];
+  barrels = startSpawns.barrels.map(b => ({ ...b, hp: 25, alive: true, fuse: -1 }));
+  explosions = [];
+  particles = [];
   totalEnemies = enemies.length;
   kills = 0;
   shootCool = muzzle = recoil = damageFlash = pickupFlash = msgT = 0;
@@ -206,8 +270,42 @@ function damagePlayer(d) {
   }
 }
 
+function spawnParticles(x, y, u, kind, n, spd) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.283, v = (0.3 + Math.random()) * spd;
+    particles.push({
+      x, y, u: u + Math.random() * 0.25,
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v, vu: 0.4 + Math.random() * 1.4,
+      t: 0.45 + Math.random() * 0.35, kind,
+    });
+  }
+}
+
+function explodeBarrel(b) {
+  if (!b.alive) return;
+  b.alive = false;
+  explosions.push({ x: b.x, y: b.y, t: 0 });
+  spawnParticles(b.x, b.y, 0.3, "spark", 14, 2.4);
+  spawnParticles(b.x, b.y, 0.2, "goo", 8, 1.8);
+  Sfx.boom();
+  const pd = Math.hypot(player.x - b.x, player.y - b.y);
+  if (pd < 2.2) damagePlayer(Math.round(34 * (1 - pd / 2.6)));
+  for (const e of enemies) {
+    if (e.state === "dead") continue;
+    const d = Math.hypot(e.x - b.x, e.y - b.y);
+    if (d < 2.4) damageEnemy(e, Math.round(95 * (1 - d / 3)));
+  }
+  for (const b2 of barrels) {
+    if (b2.alive && b2 !== b && b2.fuse < 0
+        && Math.hypot(b2.x - b.x, b2.y - b.y) < 1.9) {
+      b2.fuse = 0.12 + Math.random() * 0.15;
+    }
+  }
+}
+
 function damageEnemy(e, dmg) {
   e.hp -= dmg;
+  spawnParticles(e.x, e.y, 0.35, "blood", 7, 1.6);
   if (e.state === "idle") { e.state = "chase"; Sfx.growl(); }
   if (e.hp <= 0) {
     e.state = "dead";
@@ -237,23 +335,36 @@ function tryShoot() {
   for (const e of enemies) {
     if (e.state === "idle" && Math.hypot(e.x - player.x, e.y - player.y) < 8) e.state = "chase";
   }
-  // hitscan: nearest live enemy whose billboard covers screen centre
+  // hitscan: nearest target whose billboard covers screen centre
   let best = null, bestT = Infinity;
+  const targets = [];
   for (const e of enemies) {
-    if (e.state === "dead") continue;
-    const relX = e.x - player.x, relY = e.y - player.y;
+    if (e.state !== "dead") targets.push({ x: e.x, y: e.y, scale: e.scale, enemy: e });
+  }
+  for (const b of barrels) {
+    if (b.alive) targets.push({ x: b.x, y: b.y, scale: 0.55, barrel: b });
+  }
+  for (const t of targets) {
+    const relX = t.x - player.x, relY = t.y - player.y;
     const invDet = 1 / (planeX * dirY - dirX * planeY);
     const tx = invDet * (dirY * relX - dirX * relY);
     const ty = invDet * (-planeY * relX + planeX * relY);
     if (ty < 0.15 || ty >= bestT) continue;
     const screenX = (W / 2) * (1 + tx / ty);
-    const halfW = (H / ty) * e.scale * 0.3;
+    const halfW = (H / ty) * t.scale * 0.3;
     if (Math.abs(screenX - W / 2) > halfW) continue;
-    if (!los(player.x, player.y, e.x, e.y)) continue;
-    best = e;
+    if (!los(player.x, player.y, t.x, t.y)) continue;
+    best = t;
     bestT = ty;
   }
-  if (best) damageEnemy(best, 30 + (Math.random() * 12 | 0));
+  if (best) {
+    if (best.enemy) damageEnemy(best.enemy, 30 + (Math.random() * 12 | 0));
+    else {
+      best.barrel.hp -= 34;
+      spawnParticles(best.barrel.x, best.barrel.y, 0.4, "spark", 4, 1.4);
+      if (best.barrel.hp <= 0) explodeBarrel(best.barrel);
+    }
+  }
 }
 
 function spawnSpit(e) {
@@ -381,6 +492,27 @@ function update(dt) {
   for (const e of enemies) updateEnemy(e, dt);
   separateEnemies();
 
+  for (const b of barrels) {
+    if (b.alive && b.fuse >= 0) {
+      b.fuse -= dt;
+      if (b.fuse <= 0) explodeBarrel(b);
+    }
+  }
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].t += dt;
+    if (explosions[i].t > 0.45) explosions.splice(i, 1);
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t -= dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.u += p.vu * dt;
+    p.vu -= 5 * dt;
+    if (p.u < 0) { p.u = 0; p.vu *= -0.35; p.vx *= 0.5; p.vy *= 0.5; }
+    if (p.t <= 0 || isWall(cellAt(Math.floor(p.x), Math.floor(p.y)))) particles.splice(i, 1);
+  }
+
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     p.x += p.dx * dt;
@@ -449,6 +581,7 @@ function buildLit(tex) {
   return out;
 }
 const LIT_WALLS = WALL_TEX.map(t => (t ? buildLit(t) : null));
+const LIT_WALLS_B = WALL_TEX_B.map(t => (t ? buildLit(t) : null));
 const LIT_FLOOR = buildLit(texFloor);
 const LIT_CEIL = buildLit(texCeil);
 const LIT_EXIT = buildLit(texExitFloor);
@@ -470,8 +603,8 @@ function renderFloors() {
     let fx = px + rowDist * rx0;
     let fy = py + rowDist * ry0;
     const f = fog(rowDist) * 0.95;
-    const floorTex = LIT_FLOOR[litIndex(f)];
-    const ceilTex = LIT_CEIL[litIndex(f * 0.8)];
+    let floorTex = LIT_FLOOR[litIndex(f)];
+    let ceilTex = LIT_CEIL[litIndex(f * 0.72)];
     const exitTex = LIT_EXIT[litIndex(Math.min(1, f + 0.5) * exitPulse)];
     const rowF = y * W;
     const rowC = (H - y - 1) * W;
@@ -485,6 +618,9 @@ function renderFloors() {
         lcx = cx;
         lcy = cy;
         exit = cellAt(cx, cy) === EXIT_CELL;
+        const lv = lightAt(cx, cy);
+        floorTex = LIT_FLOOR[litIndex(f * lv)];
+        ceilTex = LIT_CEIL[litIndex(f * 0.72 * lv)];
       }
       const ti = (((fy - cy) * TEXN) | 0) * TEXN + (((fx - cx) * TEXN) | 0);
       const pf = (exit ? exitTex : floorTex)[ti];
@@ -536,7 +672,8 @@ function renderWalls() {
     let texX = (wallX * TEXN) | 0;
     if ((side === 0 && rdx > 0) || (side === 1 && rdy < 0)) texX = TEXN - texX - 1;
 
-    const t = LIT_WALLS[tex][litIndex(fog(perp) * (side === 1 ? 0.72 : 1))];
+    const variants = ((mapX + mapY) & 1) && LIT_WALLS_B[tex] ? LIT_WALLS_B : LIT_WALLS;
+    const t = variants[tex][litIndex(fog(perp) * lightAt(mapX, mapY) * (side === 1 ? 0.72 : 1))];
     const step = TEXN / lineH;
     let texPos = (clipY0 - y0) * step;
     for (let y = clipY0; y < clipY1; y++) {
@@ -550,18 +687,29 @@ function renderWalls() {
 function enemyTexture(e) {
   const S = SPRITES[e.type];
   if (e.state === "dead") return S.dead[Math.min(2, (e.deadT * 7) | 0)];
-  if (e.state === "pain") return S.pain;
+  if (e.state === "pain") return e.painT > 0.13 ? S.flash : S.pain;
   if (e.state === "attack") return S.attack;
   if (e.state === "chase") return S.walk[((e.animT * 6) | 0) % 2];
   return S.walk[0];
 }
+
+const PART_TEX = { blood: PART_BLOOD, spark: PART_SPARK, goo: PART_GOO };
 
 function renderSprites() {
   const px = player.x, py = player.y;
   const list = [];
   for (const e of enemies) list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u: 0 });
   for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : SPR_AMMO, scale: 0.55, u: 0 });
-  for (const p of projectiles) list.push({ x: p.x, y: p.y, tex: SPR_SPIT, scale: 0.3, u: 0.3 });
+  for (const p of projectiles) list.push({ x: p.x, y: p.y, tex: SPR_SPIT, scale: 0.3, u: 0.3, glow: true });
+  for (const b of barrels) {
+    if (b.alive) list.push({ x: b.x, y: b.y, tex: SPR_BARREL, scale: 0.62, u: 0 });
+  }
+  for (const L of startSpawns.lamps) list.push({ x: L.x, y: L.y, tex: SPR_LAMP, scale: 0.42, u: 0.58, glow: true });
+  for (const k of startSpawns.skulls) list.push({ x: k.x, y: k.y, tex: SPR_SKULLS, scale: 0.34, u: 0 });
+  for (const ex of explosions) {
+    list.push({ x: ex.x, y: ex.y, tex: SPR_EXPLOSION[Math.min(2, (ex.t * 7) | 0)], scale: 1.25, u: 0.05, glow: true });
+  }
+  for (const p of particles) list.push({ x: p.x, y: p.y, tex: PART_TEX[p.kind], scale: 0.07, u: p.u, glow: p.kind === "spark" });
 
   const invDet = 1 / (planeX * dirY - dirX * planeY);
   for (const s of list) {
@@ -585,7 +733,7 @@ function renderSprites() {
     const cx1 = Math.min(W, x0 + size);
     const cy0 = Math.max(0, top);
     const cy1 = Math.min(H, bottom);
-    const f = fog(ty);
+    const f = s.glow ? 1 : fog(ty) * lightAt(Math.floor(s.x), Math.floor(s.y));
     const lit = f >= 0.95; // close sprites (the big ones) skip the shade math
     const tex = s.tex;
     for (let x = cx0; x < cx1; x++) {
@@ -603,56 +751,52 @@ function renderSprites() {
 
 function drawWeapon() {
   if (state === "title") return;
-  const bx = Math.sin(bobPhase) * 9 * bobAmt;
-  const by = Math.abs(Math.cos(bobPhase)) * 7 * bobAmt + recoil * 22;
-  const cx = LW / 2 + bx;
-  const baseY = LH - HUD_H + 14 + by;
-  ctx.save();
-  ctx.translate(cx, baseY);
-  ctx.scale(1.45, 1.45);
+  const bx = Math.sin(bobPhase) * 10 * bobAmt;
+  const by = Math.abs(Math.cos(bobPhase)) * 8 * bobAmt + recoil * 26;
+  // gun sits slightly right of centre, Doom style, bottom quarter of the view
+  const GS = 0.82;
+  const gw = WEAPON_W * GS, gh = WEAPON_H * GS;
+  const gx = LW / 2 + 18 + bx - gw / 2;
+  const gy = LH - HUD_H + 34 + by - gh;
+  const mx = gx + gw / 2, myz = gy + 14 * GS; // muzzle point
 
   if (muzzle > 0) {
-    const r = 24 + Math.random() * 10;
-    const grad = ctx.createRadialGradient(0, -86, 2, 0, -86, r);
-    grad.addColorStop(0, "rgba(255,255,210,0.95)");
-    grad.addColorStop(0.4, "rgba(255,200,60,0.8)");
-    grad.addColorStop(1, "rgba(255,120,0,0)");
-    ctx.fillStyle = grad;
+    // outer glow behind the gun
+    const r = 40 + Math.random() * 14;
+    const glow = ctx.createRadialGradient(mx, myz, 3, mx, myz, r);
+    glow.addColorStop(0, "rgba(255,244,190,0.95)");
+    glow.addColorStop(0.45, "rgba(255,180,50,0.75)");
+    glow.addColorStop(1, "rgba(255,110,0,0)");
+    ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(0, -86, r, 0, 7);
+    ctx.arc(mx, myz, r, 0, 7);
     ctx.fill();
   }
 
-  // barrel
-  ctx.fillStyle = "#191c22";
-  ctx.fillRect(-9, -88, 18, 26);
-  ctx.fillStyle = "#3a4150";
-  ctx.fillRect(-6, -88, 5, 26);
-  // body
-  ctx.fillStyle = "#3c424e";
-  ctx.beginPath();
-  ctx.moveTo(-30, 4);
-  ctx.lineTo(-22, -62);
-  ctx.lineTo(22, -62);
-  ctx.lineTo(30, 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#525a6a";
-  ctx.fillRect(-22, -62, 18, 66);
-  ctx.strokeStyle = "#14161c";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-9, -88, 18, 26);
-  // energy cell
-  const pulse = 0.6 + 0.4 * Math.sin(now * 7);
-  ctx.fillStyle = `rgba(60,224,106,${pulse})`;
-  ctx.fillRect(-13, -46, 26, 9);
-  ctx.strokeStyle = "#11131a";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-13, -46, 26, 9);
-  // grip ridges
-  ctx.fillStyle = "#262b34";
-  for (let i = 0; i < 3; i++) ctx.fillRect(-26 + i * 2, -28 + i * 10, 52 - i * 4, 4);
-  ctx.restore();
+  ctx.drawImage(WEAPON_CANVAS, gx, gy, gw, gh);
+
+  // live energy cell glow
+  const pulse = 0.55 + 0.45 * Math.sin(now * 7);
+  ctx.fillStyle = `rgba(60,224,106,${0.35 + pulse * 0.55})`;
+  ctx.fillRect(gx + (WEAPON_CELL.x + 2) * GS, gy + (WEAPON_CELL.y + 2) * GS, (WEAPON_CELL.w - 4) * GS * (0.3 + 0.7 * Math.min(1, player.ammo / 40)), (WEAPON_CELL.h - 4) * GS);
+
+  if (muzzle > 0) {
+    // starburst core in front of the muzzle
+    ctx.save();
+    ctx.translate(mx, myz);
+    ctx.rotate(Math.random() * 6.283);
+    ctx.fillStyle = "rgba(255,250,210,0.95)";
+    for (let i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 4);
+      ctx.beginPath();
+      ctx.moveTo(-3, 0);
+      ctx.lineTo(0, -26 - Math.random() * 8);
+      ctx.lineTo(3, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 function drawFace(x, y, hpRatio) {
@@ -802,11 +946,27 @@ function fmtTime(s) {
   return `${m}:${sec < 10 ? "0" : ""}${sec}`;
 }
 
+// static vignette overlay, built once
+const VIGNETTE = (() => {
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.82);
+  gr.addColorStop(0, "rgba(0,0,0,0)");
+  gr.addColorStop(1, "rgba(0,0,0,0.45)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, W, H);
+  return c;
+})();
+
 function render() {
+  updateLights();
   renderFloors();
   renderWalls();
   renderSprites();
   ctx.putImageData(img, 0, 0);
+  ctx.drawImage(VIGNETTE, 0, 0);
 
   // The 2D overlay is authored in 640x400 logical coordinates.
   ctx.save();
