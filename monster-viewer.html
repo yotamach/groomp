@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GROOMP — Monster Viewer</title>
+<style>
+  html, body {
+    margin: 0;
+    background: #0a0a0c;
+    font-family: monospace;
+    color: #ccc;
+  }
+  h1 {
+    text-align: center;
+    color: #c84040;
+    padding: 24px 0 8px;
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+  #grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 24px;
+    padding: 24px;
+  }
+  .monster-card {
+    background: #14141a;
+    border: 2px solid #2a2a36;
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 220px;
+  }
+  .monster-card canvas {
+    image-rendering: pixelated;
+    width: 192px;
+    height: 192px;
+  }
+  .monster-name {
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #e8c070;
+  }
+  .frames-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .frames-row canvas {
+    image-rendering: pixelated;
+    width: 64px;
+    height: 64px;
+  }
+  .frame-label {
+    font-size: 9px;
+    color: #666;
+    text-align: center;
+    margin-top: 2px;
+  }
+  .frame-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+<h1>GROOMP — Monster Bestiary</h1>
+<div id="grid"></div>
+
+<script src="js/assets.js"></script>
+<script>
+"use strict";
+
+const MONSTER_NAMES = [
+  "groomp", "spitter", "boss", "wraith", "skitter",
+  "brute", "watcher", "hollow", "maw", "husk", "shrieker", "demon"
+];
+
+const DISPLAY_NAMES = {
+  groomp: "Groomp",
+  spitter: "Spitter",
+  boss: "Groompfather",
+  wraith: "Wraith",
+  skitter: "Skitter",
+  brute: "Brute",
+  watcher: "Watcher",
+  hollow: "Hollow",
+  maw: "Maw",
+  husk: "Husk",
+  shrieker: "Shrieker",
+  demon: "Demon",
+};
+
+function u32ToCanvas(pixels, scale) {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const ctx = c.getContext("2d");
+  const id = ctx.createImageData(64, 64);
+  id.data.set(new Uint8Array(pixels.buffer));
+  ctx.putImageData(id, 0, 0);
+  if (scale) {
+    c.style.width = scale + "px";
+    c.style.height = scale + "px";
+  }
+  return c;
+}
+
+const grid = document.getElementById("grid");
+
+for (const name of MONSTER_NAMES) {
+  const S = SPRITES[name];
+  if (!S) continue;
+
+  const card = document.createElement("div");
+  card.className = "monster-card";
+
+  const nameEl = document.createElement("div");
+  nameEl.className = "monster-name";
+  nameEl.textContent = DISPLAY_NAMES[name] || name;
+  card.appendChild(nameEl);
+
+  // Main walk[0] frame, large
+  const main = u32ToCanvas(S.walk[0], 192);
+  card.appendChild(main);
+
+  // Row of smaller frames: walk[1], attack, pain
+  const row = document.createElement("div");
+  row.className = "frames-row";
+
+  const frames = [
+    { pixels: S.walk[1], label: "walk" },
+    { pixels: S.attack,  label: "attack" },
+    { pixels: S.pain,    label: "pain" },
+  ];
+
+  for (const { pixels, label } of frames) {
+    const wrap = document.createElement("div");
+    wrap.className = "frame-wrap";
+    const c = u32ToCanvas(pixels, 64);
+    const lbl = document.createElement("div");
+    lbl.className = "frame-label";
+    lbl.textContent = label;
+    wrap.appendChild(c);
+    wrap.appendChild(lbl);
+    row.appendChild(wrap);
+  }
+
+  card.appendChild(row);
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>
