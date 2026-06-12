@@ -27,7 +27,7 @@ const MAP_STR = [
   "########################################",
   "#.....A...#.................#..........#",
   "#....a....#.........a.....b.#....c...h.#",
-  "#..P......#....%.c...c.%....#........b.#",
+  "#..P......#....%.c...c.%....D........b.#",
   "#....l.......3.....l........#.....l....#",
   "#.........a........g.....g.....q.s..f..#",
   "#.......b.#.....o....h..k..............#",
@@ -35,12 +35,12 @@ const MAP_STR = [
   "###########.h.......m....g..#..A..a....#",
   "###########...e.............#.b.....s..#",
   "##################6.#########..a...4...#",
-  "##################q.#########......o...#",
-  "##################l.#########&&&&&&&&&&&",
-  "##################..####################",
+  "##################qn#########......o...#",
+  "##################ln#########&&&&&&&&&&&",
+  "##################v.####################",
   "#.k....=................A....a...#######",
   "#..a...=.h......................a#######",
-  "#...l..=....g...............g.b..#######",
+  "#...l..D....g...............g.b..#######",
   "#......=..u.5...........w.......h#######",
   "#X..h......f..k.....a..a.....e...#######",
   "#X..B........l......u.....l......#######",
@@ -52,7 +52,8 @@ const MAP_STR = [
   "########################################",
 ];
 
-const WALL_CHARS = { "#": 1, "%": 2, "=": 3, "&": 4 };
+const WALL_CHARS = { "#": 1, "%": 2, "=": 3, "&": 4, "~": 6 };
+const DOOR_CELL = 5;
 const ENEMY_CHARS = {
   g: "groomp", s: "spitter", B: "boss", w: "wraith", c: "skitter",
   u: "brute", e: "watcher", o: "hollow", m: "maw", f: "husk", q: "shrieker",
@@ -65,6 +66,7 @@ const grid = new Uint8Array(MW * MH);
 const startSpawns = {
   player: { x: 2.5, y: 2.5 },
   enemies: [], pickups: [], barrels: [], lamps: [], skulls: [], weapons: [],
+  stairs: [], elevators: [], doorCells: [],
 };
 
 for (let y = 0; y < MH; y++) {
@@ -72,6 +74,7 @@ for (let y = 0; y < MH; y++) {
   for (let x = 0; x < MW; x++) {
     const ch = x < row.length ? row[x] : "#";
     if (WALL_CHARS[ch]) { grid[y * MW + x] = WALL_CHARS[ch]; continue; }
+    if (ch === "D") { grid[y * MW + x] = DOOR_CELL; startSpawns.doorCells.push({ x, y }); continue; }
     if (ch === "X") { grid[y * MW + x] = EXIT_CELL; continue; }
     grid[y * MW + x] = 0;
     const sx = x + 0.5, sy = y + 0.5;
@@ -84,8 +87,18 @@ for (let y = 0; y < MH; y++) {
     else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
     else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
     else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
+    else if (ch === "n") startSpawns.stairs.push({ x: sx, y: sy });
+    else if (ch === "v") startSpawns.elevators.push({ x: sx, y: sy });
   }
 }
+
+// ------------------------------------------------------------- doors
+// doorGrid: cell -> door index+1 (0 = not a door). doors[]: live state per door.
+const doorGrid = new Uint8Array(MW * MH);
+const doors = startSpawns.doorCells.map((dc, i) => {
+  doorGrid[dc.y * MW + dc.x] = i + 1;
+  return { x: dc.x, y: dc.y, openAmt: 0, state: "closed", timer: 0 };
+});
 
 // ------------------------------------------------------------- lighting
 // Static per-cell light (sector feel): random variance, bright pools under
@@ -137,12 +150,22 @@ function cellAt(cx, cy) {
   if (cx < 0 || cy < 0 || cx >= MW || cy >= MH) return 1;
   return grid[cy * MW + cx];
 }
-function isWall(c) { return c >= 1 && c <= 4; }
+function isWall(c) { return c >= 1 && c <= 4 || c === 6; }
+function isDoor(c) { return c === DOOR_CELL; }
+function doorOpenAmt(mx, my) {
+  const di = doorGrid[(my | 0) * MW + (mx | 0)] - 1;
+  return di >= 0 ? doors[di].openAmt : 0;
+}
+function isSolid(c, mx, my) {
+  if (isWall(c)) return true;
+  if (isDoor(c)) return doorOpenAmt(mx, my) < 0.45;
+  return false;
+}
 function blockedAt(x, y, r) {
-  if (isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
-   || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
-   || isWall(cellAt(Math.floor(x - r), Math.floor(y + r)))
-   || isWall(cellAt(Math.floor(x + r), Math.floor(y + r)))) return true;
+  const x0 = Math.floor(x - r), y0 = Math.floor(y - r);
+  const x1 = Math.floor(x + r), y1 = Math.floor(y + r);
+  if (isSolid(cellAt(x0, y0), x0, y0) || isSolid(cellAt(x1, y0), x1, y0)
+   || isSolid(cellAt(x0, y1), x0, y1) || isSolid(cellAt(x1, y1), x1, y1)) return true;
   for (let i = 0; i < barrels.length; i++) {
     const b = barrels[i];
     if (!b.alive) continue;
@@ -161,7 +184,10 @@ function los(x0, y0, x1, y1) {
   const steps = Math.ceil(d / 0.12) || 1;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    if (isWall(cellAt(Math.floor(x0 + dx * t), Math.floor(y0 + dy * t)))) return false;
+    const cx = Math.floor(x0 + dx * t), cy = Math.floor(y0 + dy * t);
+    const c = cellAt(cx, cy);
+    if (isWall(c)) return false;
+    if (isDoor(c) && doorOpenAmt(cx, cy) < 0.3) return false;
   }
   return true;
 }
@@ -239,6 +265,7 @@ function reset() {
   barrels = startSpawns.barrels.map(b => ({ ...b, hp: 25, alive: true, fuse: -1 }));
   explosions = [];
   particles = [];
+  for (const d of doors) { d.openAmt = 0; d.state = "closed"; d.timer = 0; }
   totalEnemies = enemies.length;
   kills = 0;
   shootCool = muzzle = recoil = damageFlash = pickupFlash = msgT = 0;
@@ -602,6 +629,31 @@ function update(dt) {
 
   if (mouseDown || keys.Space) tryShoot();
 
+  // doors: auto-open on proximity, auto-close after timeout
+  const DOOR_SPEED = 3.0;
+  for (const d of doors) {
+    const dist = Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5));
+    if (d.state === "closed" && dist < 1.5) {
+      d.state = "opening";
+      Sfx.swing && Sfx.swing(); // reuse swing sfx as door creak
+    }
+    if (d.state === "opening") {
+      d.openAmt = Math.min(1, d.openAmt + dt * DOOR_SPEED);
+      if (d.openAmt >= 1) { d.state = "open"; d.timer = 3.2; }
+    } else if (d.state === "open") {
+      if (dist < 1.8) d.timer = 2.0; // reset timer while nearby
+      d.timer -= dt;
+      if (d.timer <= 0) d.state = "closing";
+    } else if (d.state === "closing") {
+      // don't close on player
+      if (dist < 1.2) { d.state = "opening"; }
+      else {
+        d.openAmt = Math.max(0, d.openAmt - dt * DOOR_SPEED);
+        if (d.openAmt <= 0) d.state = "closed";
+      }
+    }
+  }
+
   for (const e of enemies) updateEnemy(e, dt);
   separateEnemies();
 
@@ -623,7 +675,7 @@ function update(dt) {
     p.u += p.vu * dt;
     p.vu -= 5 * dt;
     if (p.u < 0) { p.u = 0; p.vu *= -0.35; p.vx *= 0.5; p.vy *= 0.5; }
-    if (p.t <= 0 || isWall(cellAt(Math.floor(p.x), Math.floor(p.y)))) particles.splice(i, 1);
+    if (p.t <= 0 || isSolid(cellAt(Math.floor(p.x), Math.floor(p.y)), Math.floor(p.x), Math.floor(p.y))) particles.splice(i, 1);
   }
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -806,12 +858,17 @@ function renderWalls() {
     if (rdy < 0) { stepY = -1; sdy = (py - mapY) * ddy; }
     else { stepY = 1; sdy = (mapY + 1 - py) * ddy; }
 
-    let side = 0, tex = 1, guard = 0;
+    let side = 0, tex = 1, guard = 0, hitDoorOpen = 0;
     while (guard++ < 128) {
       if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0; }
       else { sdy += ddy; mapY += stepY; side = 1; }
       const c = cellAt(mapX, mapY);
       if (isWall(c)) { tex = c; break; }
+      if (isDoor(c)) {
+        const oa = doorOpenAmt(mapX, mapY);
+        if (oa < 1) { tex = c; hitDoorOpen = oa; break; }
+        // fully open door: ray passes through
+      }
     }
 
     const perp = Math.max(0.02, side === 0 ? sdx - ddx : sdy - ddy);
@@ -820,8 +877,13 @@ function renderWalls() {
     const lineH = (H / perp) | 0;
     let y0 = ((H - lineH) >> 1);
     let y1 = y0 + lineH;
+
+    // Door: slides upward as it opens — visible portion shrinks from top
+    const doorOff = isDoor(tex) ? (lineH * hitDoorOpen) | 0 : 0;
+    const drawY0 = Math.max(0, y0 + doorOff);
     const clipY0 = Math.max(0, y0);
     const clipY1 = Math.min(H, y1);
+    if (drawY0 >= clipY1) continue; // fully open (door gone)
 
     let wallX = side === 0 ? py + perp * rdy : px + perp * rdx;
     wallX -= Math.floor(wallX);
@@ -831,8 +893,9 @@ function renderWalls() {
     const variants = ((mapX + mapY) & 1) && LIT_WALLS_B[tex] ? LIT_WALLS_B : LIT_WALLS;
     const t = variants[tex][litIndex(fog(perp) * lightAt(mapX, mapY) * (side === 1 ? 0.72 : 1))];
     const step = TEXN / lineH;
-    let texPos = (clipY0 - y0) * step;
-    for (let y = clipY0; y < clipY1; y++) {
+    // texPos starts from the actual door top (accounts for slide)
+    let texPos = (drawY0 - y0) * step;
+    for (let y = drawY0; y < clipY1; y++) {
       const texY = (texPos | 0) & (TEXN - 1);
       texPos += step;
       buf[y * W + x] = t[texY * TEXN + texX];
@@ -869,6 +932,8 @@ function renderSprites() {
   }
   for (const L of startSpawns.lamps) list.push({ x: L.x, y: L.y, tex: SPR_LAMP, scale: 0.42, u: 0.58, glow: true });
   for (const k of startSpawns.skulls) list.push({ x: k.x, y: k.y, tex: SPR_SKULLS, scale: 0.34, u: 0 });
+  for (const s of startSpawns.stairs) list.push({ x: s.x, y: s.y, tex: SPR_STAIRS, scale: 0.72, u: 0 });
+  for (const v of startSpawns.elevators) list.push({ x: v.x, y: v.y, tex: SPR_ELEVATOR, scale: 0.65, u: 0.1, glow: true });
   for (const ex of explosions) {
     list.push({ x: ex.x, y: ex.y, tex: SPR_EXPLOSION[Math.min(2, (ex.t * 7) | 0)], scale: ex.scale || 1.25, u: 0.05, glow: true });
   }

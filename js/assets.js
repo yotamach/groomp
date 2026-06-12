@@ -233,12 +233,104 @@ function drawSlimePix(g) {
   }
 }
 
+// Metal sliding door — two inset panels, centre seam, riveted frame, status light
+function drawDoorTex(g, variant) {
+  g.fillStyle = "#3a4048";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#2e3540", 0.3);
+  dither(g, 0, 0, 64, 64, "#464e5c", 0.18);
+  // frame
+  g.fillStyle = "#5a6270";
+  g.fillRect(0, 0, 6, 64);
+  g.fillRect(58, 0, 6, 64);
+  g.fillRect(0, 0, 64, 5);
+  g.fillRect(0, 59, 64, 5);
+  g.fillStyle = "rgba(255,255,255,0.22)";
+  g.fillRect(0, 0, 64, 1.5);
+  g.fillRect(0, 0, 1.5, 64);
+  g.fillStyle = "rgba(0,0,0,0.55)";
+  g.fillRect(0, 62, 64, 2);
+  g.fillRect(62, 0, 2, 64);
+  // centre seam
+  g.fillStyle = "#1e2228";
+  g.fillRect(29, 5, 6, 54);
+  g.fillStyle = "rgba(255,255,255,0.1)";
+  g.fillRect(30, 5, 1, 54);
+  // four inset panels
+  const dp = (x, y, w, h) => {
+    g.fillStyle = "#2a3038";
+    g.fillRect(x, y, w, h);
+    g.fillStyle = "rgba(0,0,0,0.55)";
+    g.fillRect(x, y, w, 1); g.fillRect(x, y, 1, h);
+    g.fillStyle = "rgba(255,255,255,0.12)";
+    g.fillRect(x, y + h - 1, w, 1); g.fillRect(x + w - 1, y, 1, h);
+    dither(g, x + 1, y + 1, w - 2, h - 2, "#252b32", 0.22);
+  };
+  dp(7, 6, 21, 24); dp(36, 6, 21, 24);
+  dp(7, 32, 21, 22); dp(36, 32, 21, 22);
+  // status light (red = closed / green = back-side)
+  const lc = variant ? "#38e060" : "#e04030";
+  const lr = variant ? "#0a4020" : "#500a08";
+  const lg = g.createRadialGradient(32, 56, 0.5, 32, 56, 4.5);
+  lg.addColorStop(0, lc);
+  lg.addColorStop(0.6, lr);
+  lg.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = lg;
+  g.beginPath(); g.arc(32, 56, 4.5, 0, 7); g.fill();
+  // corner rivets
+  for (const [rx, ry] of [[9, 9], [55, 9], [9, 55], [55, 55]]) {
+    g.fillStyle = "#6a7080";
+    g.beginPath(); g.arc(rx, ry, 2.2, 0, 7); g.fill();
+    g.fillStyle = "#18202a";
+    g.beginPath(); g.arc(rx + 0.5, ry + 0.5, 1, 0, 7); g.fill();
+  }
+  addNoise(g, 12);
+}
+
+// Rough concrete wall — chunky cast slabs with poured seams
+function drawConcreteTex(g, variant) {
+  g.fillStyle = "#686060";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#5a5454", 0.38);
+  dither(g, 0, 0, 64, 64, "#786e6e", 0.25);
+  // horizontal poured joints at thirds
+  for (const sy of [21, 42]) {
+    g.fillStyle = "#383030";
+    g.fillRect(0, sy, 64, 2.5);
+    g.fillStyle = "rgba(255,255,255,0.12)";
+    g.fillRect(0, sy - 1, 64, 1);
+  }
+  // vertical crack lines (offset per row)
+  const joints = variant ? [16, 48] : [32];
+  for (const jx of joints) {
+    g.fillStyle = "#3a3232";
+    g.fillRect(jx, 0, 1.5, 21);
+    g.fillRect(jx + 16, 21, 1.5, 21);
+    g.fillRect(jx, 42, 1.5, 22);
+  }
+  // aggregate pits
+  pits(g, 0, 0, 64, 64, 28, 0.18);
+  if (variant) {
+    // seepage stains
+    for (let i = 0; i < 4; i++) {
+      const x = 4 + rnd() * 56;
+      g.fillStyle = `rgba(22,18,14,${0.12 + rnd() * 0.15})`;
+      g.fillRect(x, 0, 2 + rnd() * 3, 22 + rnd() * 30);
+    }
+  }
+  addNoise(g, 14);
+}
+
 const texPanel = makePixels(g => drawPanel(g, false));
 const texPanelB = makePixels(g => drawPanel(g, true));
 const texBrick = makePixels(g => drawBrickPix(g, false));
 const texBrickB = makePixels(g => drawBrickPix(g, true));
 const texTech = makePixels(drawCompute);
 const texSlime = makePixels(drawSlimePix);
+const texDoor = makePixels(g => drawDoorTex(g, false));
+const texDoorB = makePixels(g => drawDoorTex(g, true));
+const texConcrete = makePixels(g => drawConcreteTex(g, false));
+const texConcreteB = makePixels(g => drawConcreteTex(g, true));
 
 // chamfered grey tiles, like the classic hexagonal Doom floors
 const texFloor = makePixels(g => {
@@ -307,8 +399,8 @@ const texExitFloor = makePixels(g => {
   addNoise(g, 10);
 });
 
-const WALL_TEX = [null, texPanel, texBrick, texTech, texSlime];
-const WALL_TEX_B = [null, texPanelB, texBrickB, null, null];
+const WALL_TEX = [null, texPanel, texBrick, texTech, texSlime, texDoor, texConcrete];
+const WALL_TEX_B = [null, texPanelB, texBrickB, null, null, texDoorB, texConcreteB];
 
 // ---------------------------------------------------------------- enemies
 // A "groomp" is a one-eyed hopping blob. Frames are drawn parametrically so
@@ -1413,6 +1505,88 @@ const SPR_SKULLS = makePixels(g => {
   skull(24, 48, 7);
   skull(40, 50, 5.5);
   skull(32, 56, 6);
+});
+
+// stair decoration — 4-step descending staircase in perspective
+const SPR_STAIRS = makePixels(g => {
+  for (let i = 0; i < 4; i++) {
+    const base = 88 + i * 11;
+    const x = 4 + i * 14, w = 56 - i * 14, y = 38 - i * 7;
+    g.fillStyle = `rgb(${base + 10},${base + 6},${base - 2})`;
+    g.fillRect(x, y, w, 7);
+    g.fillStyle = "rgba(255,255,255,0.18)";
+    g.fillRect(x, y, w, 1.4);
+    g.fillStyle = `rgb(${base - 22},${base - 25},${base - 30})`;
+    g.fillRect(x, y + 7, w, 7);
+    g.fillStyle = "rgba(0,0,0,0.4)";
+    g.fillRect(x, y + 13, w, 1.2);
+    // side riser shading
+    if (i < 3) {
+      g.fillStyle = `rgba(0,0,0,0.45)`;
+      g.fillRect(x + w, y, 14, 7);
+    }
+  }
+  // railing posts
+  for (let i = 0; i < 3; i++) {
+    g.fillStyle = "#6a6e78";
+    g.fillRect(4 + i * 20, 10, 2.5, 30 - i * 7);
+    g.fillStyle = "rgba(255,255,255,0.25)";
+    g.fillRect(4 + i * 20, 10, 1, 30 - i * 7);
+  }
+  // railing bar
+  g.fillStyle = "#5a5e68";
+  g.beginPath();
+  g.moveTo(4, 12); g.lineTo(44, 10); g.lineTo(44, 12.5); g.lineTo(4, 14.5);
+  g.closePath(); g.fill();
+});
+
+// elevator platform — shaft, arrow, hazard stripes, call button
+const SPR_ELEVATOR = makePixels(g => {
+  // shaft walls
+  g.fillStyle = "#252b32";
+  g.fillRect(10, 4, 7, 32); g.fillRect(47, 4, 7, 32);
+  g.fillStyle = "#1a1e24";
+  g.fillRect(11, 5, 2, 30); g.fillRect(52, 5, 2, 30);
+  // shaft back-wall
+  g.fillStyle = "#1a1d22";
+  g.fillRect(17, 4, 30, 32);
+  dither(g, 17, 4, 30, 32, "#141618", 0.3);
+  // guide cables
+  g.strokeStyle = "#3a3e4a";
+  g.lineWidth = 1.2;
+  for (const cx of [24, 40]) {
+    g.beginPath(); g.moveTo(cx, 4); g.lineTo(cx, 36); g.stroke();
+  }
+  // up arrow
+  g.fillStyle = "#3fe06a";
+  g.beginPath();
+  g.moveTo(32, 8); g.lineTo(39, 20); g.lineTo(25, 20);
+  g.closePath(); g.fill();
+  // platform slab
+  const pg = g.createLinearGradient(10, 36, 54, 36);
+  pg.addColorStop(0, "#1e2228"); pg.addColorStop(0.45, "#3e464e"); pg.addColorStop(1, "#16181e");
+  g.fillStyle = pg;
+  g.fillRect(10, 36, 44, 20);
+  g.fillStyle = "rgba(255,255,255,0.14)";
+  g.fillRect(10, 36, 44, 1.5);
+  // hazard stripes
+  for (let x = 10; x < 54; x += 8) {
+    g.fillStyle = ((x >> 3) & 1) ? "#c9a227" : "#1a1c22";
+    g.fillRect(x, 52, 8, 4);
+  }
+  // call button panel
+  g.fillStyle = "#12141a";
+  g.fillRect(22, 60, 20, 4);
+  g.fillStyle = "#3fe06a";
+  g.beginPath(); g.arc(29, 62, 2, 0, 7); g.fill();
+  g.fillStyle = "#e04030";
+  g.beginPath(); g.arc(35, 62, 2, 0, 7); g.fill();
+  // glow under platform
+  const glow = g.createRadialGradient(32, 56, 2, 32, 56, 16);
+  glow.addColorStop(0, "rgba(63,224,106,0.35)");
+  glow.addColorStop(1, "rgba(63,224,106,0)");
+  g.fillStyle = glow;
+  g.beginPath(); g.ellipse(32, 56, 16, 6, 0, 0, 7); g.fill();
 });
 
 // explosion frames
