@@ -1106,6 +1106,220 @@ function drawShrieker(g, pal, pose) {
   }
 }
 
+// Demon — a hulking pink charger in the classic Doom mold: hunched muscular
+// back, brow-shadowed yellow eyes, a gaping jaw of teeth, claws and hooves.
+function drawDemon(g, pal, pose) {
+  const cx = 32;
+  const lean = pose.step ? 1.6 : -1.6;
+  const rage = pose.attack ? 1 : 0;
+  const L = pal.lite, B = pal.body, D = pal.dark, DD = pal.deep;
+
+  // ---- hind legs (digitigrade, hooved)
+  for (const s of [-1, 1]) {
+    const lx = cx + s * 11 + (s === 1 ? lean : -lean);
+    g.fillStyle = D;
+    g.beginPath();
+    g.ellipse(lx, 47, 6.5, 9, s * 0.18, 0, 7);
+    g.fill();
+    g.fillStyle = B;
+    g.beginPath();
+    g.ellipse(lx - s * 1.5, 45, 4.5, 7, s * 0.18, 0, 7);
+    g.fill();
+    // shin
+    g.fillStyle = D;
+    g.beginPath();
+    g.moveTo(lx - 3, 52);
+    g.lineTo(lx + 3, 52);
+    g.lineTo(lx + s * 2 + 2, 58);
+    g.lineTo(lx + s * 2 - 2, 58);
+    g.closePath();
+    g.fill();
+    // hoof
+    g.fillStyle = "#6a7078";
+    g.fillRect(lx + s * 2 - 3, 57, 6, 3.5);
+    g.fillStyle = "#9aa0a8";
+    g.fillRect(lx + s * 2 - 3, 57, 6, 1.2);
+  }
+
+  // ---- hunched back / shoulder hump
+  g.fillStyle = D;
+  g.beginPath();
+  g.ellipse(cx + lean, 15 - rage * 2, 21, 11, 0, 0, 7);
+  g.fill();
+  g.fillStyle = B;
+  g.beginPath();
+  g.ellipse(cx + lean - 2, 13.5 - rage * 2, 17, 8, 0, 0, 7);
+  g.fill();
+  g.fillStyle = L;
+  g.beginPath();
+  g.ellipse(cx + lean - 5, 11.5 - rage * 2, 10, 4, 0, 0, 7);
+  g.fill();
+  // spine ridge
+  g.fillStyle = DD;
+  g.fillRect(cx + lean - 1, 4 - rage * 2, 2, 9);
+
+  // ---- torso
+  g.fillStyle = D;
+  g.beginPath();
+  g.ellipse(cx + lean, 34, 18, 17, 0, 0, 7);
+  g.fill();
+  g.fillStyle = B;
+  g.beginPath();
+  g.ellipse(cx + lean - 1, 33, 15.5, 15, 0, 0, 7);
+  g.fill();
+
+  // ---- arms: shoulders, forearms to the ground, claws
+  for (const s of [-1, 1]) {
+    const raise = rage ? (s === 1 ? 10 : 8) : 0;
+    const shx = cx + s * 17 + lean, shy = 20;
+    // deltoid ball
+    g.fillStyle = D;
+    g.beginPath();
+    g.ellipse(shx, shy, 8, 7.5, 0, 0, 7);
+    g.fill();
+    g.fillStyle = B;
+    g.beginPath();
+    g.ellipse(shx - s * 1.5, shy - 1.5, 6, 5.5, 0, 0, 7);
+    g.fill();
+    g.fillStyle = L;
+    g.beginPath();
+    g.ellipse(shx - s * 2.5, shy - 3, 3.4, 2.4, 0, 0, 7);
+    g.fill();
+    // upper arm + forearm
+    const ex = cx + s * 24 + lean, ey = 36 - raise * 0.5;
+    const hx = cx + s * 25 + lean, hy = 54 - raise * 1.6;
+    g.strokeStyle = D;
+    g.lineWidth = 8;
+    g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(shx, shy + 2);
+    g.quadraticCurveTo(ex, ey, hx, hy);
+    g.stroke();
+    g.strokeStyle = B;
+    g.lineWidth = 5;
+    g.beginPath();
+    g.moveTo(shx - s, shy + 1);
+    g.quadraticCurveTo(ex - s * 2, ey - 1, hx - s, hy - 1.5);
+    g.stroke();
+    // knuckle + grey claws
+    g.fillStyle = B;
+    g.beginPath();
+    g.ellipse(hx, hy + 1, 4.5, 3.6, 0, 0, 7);
+    g.fill();
+    g.fillStyle = "#b8bec6";
+    for (let i = -1; i <= 1; i++) {
+      g.beginPath();
+      g.moveTo(hx + i * 3 - 1.4, hy + 2);
+      g.lineTo(hx + i * 3 + 1.4, hy + 2);
+      g.lineTo(hx + i * 3 + (rage ? s * 2 : 0), hy + 7);
+      g.closePath();
+      g.fill();
+    }
+  }
+
+  // ---- head fused low into the chest
+  const hy0 = 21 - rage * 2;
+  g.fillStyle = D;
+  g.beginPath();
+  g.ellipse(cx + lean, hy0 + 4, 13.5, 12, 0, 0, 7);
+  g.fill();
+  g.fillStyle = B;
+  g.beginPath();
+  g.ellipse(cx + lean - 1, hy0 + 3, 11.5, 10, 0, 0, 7);
+  g.fill();
+  // horn nubs
+  for (const s of [-1, 1]) {
+    g.fillStyle = "#9aa0a8";
+    g.beginPath();
+    g.moveTo(cx + s * 12 + lean, hy0 - 2);
+    g.lineTo(cx + s * 16 + lean, hy0 - 6);
+    g.lineTo(cx + s * 13.5 + lean, hy0 + 2);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#d8dce2";
+    g.beginPath();
+    g.arc(cx + s * 15.4 + lean, hy0 - 5.2, 1, 0, 7);
+    g.fill();
+  }
+  // brow ridge shadow
+  g.fillStyle = DD;
+  g.beginPath();
+  g.ellipse(cx + lean, hy0 - 1, 10.5, 3.4, 0, 0, 7);
+  g.fill();
+  // glowing yellow eyes under the brow
+  if (!pose.pain) {
+    for (const s of [-1, 1]) {
+      glowEye(g, cx + s * 5.5 + lean, hy0 + 0.5, 1.5, "#ffd428");
+      g.fillStyle = "#1a1206";
+      g.fillRect(cx + s * 5.5 + lean - 0.7, hy0 - 0.4, 1.4, 1.8);
+      // angry slanted brow cutting across the top of the eye
+      g.strokeStyle = DD;
+      g.lineWidth = 2.6;
+      g.beginPath();
+      g.moveTo(cx + s * 9.5 + lean, hy0 - 3.6);
+      g.lineTo(cx + s * 2 + lean, hy0 - 0.4);
+      g.stroke();
+    }
+  } else {
+    g.strokeStyle = "#2a1208";
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(cx - 8 + lean, hy0 + 1);
+    g.lineTo(cx - 3 + lean, hy0);
+    g.moveTo(cx + 3 + lean, hy0);
+    g.lineTo(cx + 8 + lean, hy0 + 1);
+    g.stroke();
+  }
+  // nostrils
+  g.fillStyle = DD;
+  g.fillRect(cx - 2.4 + lean, hy0 + 4, 1.6, 1.6);
+  g.fillRect(cx + 1 + lean, hy0 + 4, 1.6, 1.6);
+
+  // ---- the maw
+  const mouthY = hy0 + 11;
+  const open = 6 + rage * 4;
+  g.fillStyle = "#1c0406";
+  g.beginPath();
+  g.ellipse(cx + lean, mouthY, 9.5, open, 0, 0, 7);
+  g.fill();
+  // throat
+  g.fillStyle = "#8a1410";
+  g.beginPath();
+  g.ellipse(cx + lean, mouthY + open * 0.3, 5, open * 0.45, 0, 0, 7);
+  g.fill();
+  // lips
+  g.strokeStyle = DD;
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.ellipse(cx + lean, mouthY, 9.5, open, 0, 0, 7);
+  g.stroke();
+  // teeth
+  fangRow(g, cx + lean - 8, mouthY - open + 1.2, 16, 5, 3.6, true, "#e8e2d0");
+  fangRow(g, cx + lean - 7, mouthY + open - 1.2, 14, 4, 3.2, false, "#d8d0ba");
+
+  // ---- pec definition
+  for (const s of [-1, 1]) {
+    g.strokeStyle = D;
+    g.lineWidth = 1.4;
+    g.beginPath();
+    g.arc(cx + s * 8 + lean, 40, 6, Math.PI * 0.15, Math.PI * 0.85);
+    g.stroke();
+    g.fillStyle = L;
+    g.beginPath();
+    g.ellipse(cx + s * 8 + lean - 1, 37.5, 3.6, 1.8, 0, 0, 7);
+    g.fill();
+  }
+  // orange gashes on the flank
+  g.strokeStyle = "#d8742a";
+  g.lineWidth = 1.2;
+  for (let i = 0; i < 3; i++) {
+    g.beginPath();
+    g.moveTo(cx + 11 + lean, 42 + i * 3);
+    g.lineTo(cx + 15 + lean, 43.5 + i * 3);
+    g.stroke();
+  }
+}
+
 const SPRITES = {
   groomp: buildEnemySheet({ body: "#3aa32a", lite: "#7ed64f", dark: "#16500f" }),
   spitter: buildEnemySheet({ body: "#a836a8", lite: "#e07ae0", dark: "#561256" }),
@@ -1118,6 +1332,7 @@ const SPRITES = {
   maw: buildSheet(drawMaw, { body: "#6e1f24", lite: "#a8453a", dark: "#330a10" }),
   husk: buildSheet(drawHusk, { body: "#241d18", lite: "#46362a", dark: "#0e0b08" }),
   shrieker: buildSheet(drawShrieker, { body: "#5e5a6e", lite: "#928da6", dark: "#28253a" }),
+  demon: buildSheet(drawDemon, { body: "#c06a52", lite: "#e8a088", dark: "#8a3a2a", deep: "#571f14" }),
 };
 
 // ---------------------------------------------------------------- items
