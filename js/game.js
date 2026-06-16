@@ -18,6 +18,12 @@ const img = ctx.createImageData(W, H);
 const buf = new Uint32Array(img.data.buffer);
 const zbuf = new Float32Array(W);
 
+// Offscreen canvas so putImageData can be shifted for screen shake
+const offCanvas = document.createElement("canvas");
+offCanvas.width = W; offCanvas.height = H;
+const offCtx = offCanvas.getContext("2d");
+offCtx.imageSmoothingEnabled = false;
+
 // ------------------------------------------------------------------ map
 // '#' brick  '%' stone  '=' tech  '&' slime  '.' floor  'X' exit pad
 // 'P' player  'g' groomp  's' spitter  'B' boss groomp  'h' medkit  'a' ammo
@@ -213,6 +219,14 @@ let damageFlash = 0, pickupFlash = 0;
 let msg = "", msgT = 0;
 let showMap = false;
 
+// Polish effects
+let screenShake = 0, shakeX = 0, shakeY = 0;
+let hitMarkers = []; // {t, kill}
+let crosshairBloat = 0;
+let weaponSlide = 0;
+let multiKillT = 0, multiKillCount = 0;
+let killFlash = 0;
+
 function flash(text) { msg = text; msgT = 2.4; }
 
 function reset() {
@@ -244,6 +258,9 @@ function reset() {
   totalEnemies = enemies.length;
   kills = 0;
   shootCool = muzzle = recoil = damageFlash = pickupFlash = msgT = 0;
+  screenShake = shakeX = shakeY = crosshairBloat = weaponSlide = 0;
+  hitMarkers = [];
+  multiKillT = multiKillCount = killFlash = 0;
   startTime = now;
 }
 
@@ -263,6 +280,7 @@ addEventListener("keydown", e => {
     if (slot >= 1 && slot <= 7 && owned[slot] && slot !== curGun && state === "playing") {
       curGun = slot;
       muzzle = 0;
+      weaponSlide = 1;
       shootCool = Math.max(shootCool, 0.18);
     }
   }
@@ -273,7 +291,7 @@ canvas.addEventListener("wheel", e => {
   const d = e.deltaY > 0 ? 1 : -1;
   for (let i = 1; i <= 7; i++) {
     const slot = ((curGun - 1 + d * i) % 7 + 7) % 7 + 1;
-    if (owned[slot]) { curGun = slot; shootCool = Math.max(shootCool, 0.18); break; }
+    if (owned[slot]) { curGun = slot; weaponSlide = 1; shootCool = Math.max(shootCool, 0.18); break; }
   }
 });
 addEventListener("keyup", e => { keys[e.code] = false; });
@@ -317,6 +335,7 @@ function damagePlayer(d) {
   d -= absorb;
   player.hp -= d;
   damageFlash = Math.min(0.9, damageFlash + 0.45);
+  screenShake = Math.min(1, screenShake + 0.35);
   if (player.hp <= 0) {
     player.hp = 0;
     state = "dead";
@@ -342,6 +361,7 @@ function explodeAt(x, y, r, dmgMax, scale = 1.25) {
   explosions.push({ x, y, t: 0, scale });
   spawnParticles(x, y, 0.3, "spark", 10 + r * 4 | 0, 1.6 + r * 0.5);
   Sfx.boom();
+  screenShake = Math.min(1, screenShake + 0.45 + r * 0.12);
   const pd = Math.hypot(player.x - x, player.y - y);
   if (pd < r) damagePlayer(Math.max(1, Math.round(dmgMax * 0.4 * (1 - pd / (r + 0.4)))));
   for (const e of enemies) {
@@ -367,10 +387,22 @@ function damageEnemy(e, dmg) {
   e.hp -= dmg;
   spawnParticles(e.x, e.y, 0.35, "blood", 7, 1.6);
   if (e.state === "idle") { e.state = "chase"; Sfx.growl(); }
+  const isKill = e.hp <= 0;
+  hitMarkers.push({ t: isKill ? 0.5 : 0.28, kill: isKill });
+  if (hitMarkers.length > 4) hitMarkers.shift();
   if (e.hp <= 0) {
     e.state = "dead";
     e.deadT = 0;
     kills++;
+    killFlash = 0.12;
+    if (multiKillT > 0) {
+      multiKillCount++;
+      const mkMsgs = ["DOUBLE KILL!", "TRIPLE KILL!", "RAMPAGE!", "MASSACRE!", "UNSTOPPABLE!"];
+      flash(mkMsgs[Math.min(4, multiKillCount - 1)]);
+    } else {
+      multiKillCount = 1;
+    }
+    multiKillT = 2.8;
     Sfx.enemyDie();
     if (kills === totalEnemies) flash("All groomps splattered! Find the exit pad.");
     else if (e.type === "boss") flash("The Groompfather has fallen!");
@@ -450,6 +482,7 @@ function tryShoot() {
   if (Wp.melee) { meleeSwing(Wp.melee.range, Wp.melee.dmg); return; }
   if (Wp.ammo) ammoPool[Wp.ammo] -= Wp.use;
   muzzle = 0.07;
+  crosshairBloat = Math.min(1, crosshairBloat + 0.38);
   Sfx.fire(curGun);
   // gunfire wakes anything close enough to hear it
   for (const e of enemies) {
@@ -573,6 +606,17 @@ function update(dt) {
   damageFlash = Math.max(0, damageFlash - dt * 1.6);
   pickupFlash = Math.max(0, pickupFlash - dt * 3);
   msgT = Math.max(0, msgT - dt);
+  screenShake = Math.max(0, screenShake - dt * 5.5);
+  shakeX = screenShake > 0.01 ? (Math.random() - 0.5) * screenShake * 10 : 0;
+  shakeY = screenShake > 0.01 ? (Math.random() - 0.5) * screenShake * 7 : 0;
+  crosshairBloat = Math.max(0, crosshairBloat - dt * 4.5);
+  weaponSlide = Math.max(0, weaponSlide - dt * 10);
+  killFlash = Math.max(0, killFlash - dt * 7);
+  multiKillT = Math.max(0, multiKillT - dt);
+  for (let i = hitMarkers.length - 1; i >= 0; i--) {
+    hitMarkers[i].t -= dt;
+    if (hitMarkers[i].t <= 0) hitMarkers.splice(i, 1);
+  }
 
   if (state !== "playing") return;
 
@@ -598,6 +642,7 @@ function update(dt) {
       player.r);
     bobPhase += speed * 2.6;
     bobAmt = Math.min(1, bobAmt + dt * 6);
+    crosshairBloat = Math.min(1, crosshairBloat + bobAmt * dt * 2.2);
   } else {
     bobAmt = Math.max(0, bobAmt - dt * 4);
   }
@@ -919,7 +964,7 @@ function drawWeapon() {
   const G = GUNS[curGun];
   const green = curGun === 6 || curGun === 7;
   const bx = Math.sin(bobPhase) * 10 * bobAmt;
-  const by = Math.abs(Math.cos(bobPhase)) * 8 * bobAmt + recoil * 26;
+  const by = Math.abs(Math.cos(bobPhase)) * 8 * bobAmt + recoil * 26 + weaponSlide * 110;
   // gun sits slightly right of centre, Doom style, bottom quarter of the view
   const GS = 0.82;
   const gw = G.w * GS, gh = G.h * GS;
@@ -1293,8 +1338,12 @@ function render() {
   renderFloors();
   renderWalls();
   renderSprites();
-  ctx.putImageData(img, 0, 0);
+  offCtx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+  ctx.drawImage(offCanvas, 0, 0);
   ctx.drawImage(VIGNETTE, 0, 0);
+  ctx.restore();
 
   // The 2D overlay is authored in 640x400 logical coordinates.
   ctx.save();
@@ -1303,7 +1352,25 @@ function render() {
   drawWeapon();
 
   if (damageFlash > 0) {
-    ctx.fillStyle = `rgba(200,10,10,${Math.min(0.55, damageFlash)})`;
+    const viewH = LH - HUD_H;
+    const dv = ctx.createRadialGradient(LW / 2, viewH / 2, viewH * 0.18, LW / 2, viewH / 2, viewH * 0.78);
+    dv.addColorStop(0, "rgba(200,10,10,0)");
+    dv.addColorStop(0.5, `rgba(200,10,10,${Math.min(0.22, damageFlash * 0.2)})`);
+    dv.addColorStop(1, `rgba(200,10,10,${Math.min(0.92, damageFlash * 0.95)})`);
+    ctx.fillStyle = dv;
+    ctx.fillRect(0, 0, LW, viewH);
+  }
+  if (state === "playing" && player.hp > 0 && player.hp < 30) {
+    const viewH = LH - HUD_H;
+    const pulse = 0.4 + 0.4 * Math.sin(now * (4.5 + (30 - player.hp) * 0.18));
+    const lhv = ctx.createRadialGradient(LW / 2, viewH / 2, viewH * 0.22, LW / 2, viewH / 2, viewH * 0.88);
+    lhv.addColorStop(0, "rgba(180,0,0,0)");
+    lhv.addColorStop(1, `rgba(180,0,0,${pulse * 0.55 * (1 - player.hp / 30)})`);
+    ctx.fillStyle = lhv;
+    ctx.fillRect(0, 0, LW, viewH);
+  }
+  if (killFlash > 0) {
+    ctx.fillStyle = `rgba(255,255,190,${killFlash * 0.28})`;
     ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
   if (pickupFlash > 0) {
@@ -1312,15 +1379,32 @@ function render() {
   }
 
   if (state === "playing") {
-    // crosshair
-    ctx.strokeStyle = "rgba(255,255,255,0.8)";
-    ctx.lineWidth = 2;
+    const cx = LW / 2, cy = LH / 2 - 32;
+    const bloom = 4 + crosshairBloat * 13;
+    const clen = 6;
+    const calpha = muzzle > 0 ? 0.45 : 0.82;
+    ctx.strokeStyle = `rgba(255,255,255,${calpha})`;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(LW / 2 - 7, LH / 2 - 32); ctx.lineTo(LW / 2 - 2, LH / 2 - 32);
-    ctx.moveTo(LW / 2 + 2, LH / 2 - 32); ctx.lineTo(LW / 2 + 7, LH / 2 - 32);
-    ctx.moveTo(LW / 2, LH / 2 - 39); ctx.lineTo(LW / 2, LH / 2 - 34);
-    ctx.moveTo(LW / 2, LH / 2 - 30); ctx.lineTo(LW / 2, LH / 2 - 25);
+    ctx.moveTo(cx - bloom - clen, cy); ctx.lineTo(cx - bloom, cy);
+    ctx.moveTo(cx + bloom, cy);        ctx.lineTo(cx + bloom + clen, cy);
+    ctx.moveTo(cx, cy - bloom - clen); ctx.lineTo(cx, cy - bloom);
+    ctx.moveTo(cx, cy + bloom);        ctx.lineTo(cx, cy + bloom + clen);
     ctx.stroke();
+    ctx.fillStyle = `rgba(255,255,255,${calpha * 0.65})`;
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    // hit markers
+    for (const hm of hitMarkers) {
+      const maxT = hm.kill ? 0.5 : 0.28;
+      const a = Math.min(1, hm.t / maxT) * (hm.kill ? 1 : 0.8);
+      const sz = hm.kill ? 9 : 5;
+      ctx.strokeStyle = hm.kill ? `rgba(255,210,0,${a})` : `rgba(255,255,255,${a})`;
+      ctx.lineWidth = hm.kill ? 2.2 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - sz, cy - sz); ctx.lineTo(cx + sz, cy + sz);
+      ctx.moveTo(cx + sz, cy - sz); ctx.lineTo(cx - sz, cy + sz);
+      ctx.stroke();
+    }
   }
 
   drawHud();
