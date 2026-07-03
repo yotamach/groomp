@@ -25,84 +25,426 @@ const offCtx = offCanvas.getContext("2d");
 offCtx.imageSmoothingEnabled = false;
 
 // ------------------------------------------------------------------ map
-// '#' brick  '%' stone  '=' tech  '&' slime  '.' floor  'X' exit pad
-// 'P' player  'g' groomp  's' spitter  'B' boss groomp  'h' medkit  'a' ammo
-// 'l' hanging lamp  'b' exploding barrel  'k' bone pile
+// Floors are generated, not authored: three worlds of twenty floors each,
+// built from seeded room-and-corridor maps, so every floor is fixed forever
+// without storing any of them. Cell types:
+// 0 floor · 1 panel · 2 brick · 3 tech · 4 slime (walls)
+// 5 water · 6 toxic sludge · 7 stairs down · 8 elevator · 9 exit pad
+// Map characters: walls '#' '%' '=' '&' · '~' water · '!' toxic sludge
+// '>' stairs · 'E' elevator · 'X' exit pad · 'P' player · enemy letters per
+// ENEMY_CHARS · 'h' medkit · 'a' ammo · 'A' armor · '3'-'7' weapon pickups
+// 'b' exploding barrel · 'l' hanging lamp · 'k' bone pile
 
-const MAP_STR = [
-  "########################################",
-  "#.....A...#.................#..........#",
-  "#....a....#.........a.....b.#....c...h.#",
-  "#..P......#....%.c...c.%....#........b.#",
-  "#....l.......3.....l........#.....l....#",
-  "#.........a........g.....g.....q.s..f..#",
-  "#.......b.#.....o..d.h..k.........d....#",
-  "#......k..#....%.......%....#....k.w...#",
-  "###########.h.......m....g..#..A..a....#",
-  "###########...e.........d...#.b.....s..#",
-  "##################6.#########..a...4...#",
-  "##################q.#########......o...#",
-  "##################l.#########&&&&&&&&&&&",
-  "##################..####################",
-  "#.k....=................A....a...#######",
-  "#..a...=.h......................a#######",
-  "#...l..=....g...............g.b..#######",
-  "#......=..u.5...........w..d....h#######",
-  "#X..h......f..k.....a..a.....e...#######",
-  "#X..B........l......u.....l......#######",
-  "#X.w...=..........d..............#######",
-  "#....b.=.......c............m....#######",
-  "#.7....=..s.....c...g...b.....s..#######",
-  "#..h...=.b.....a...........k.....#######",
-  "#......=.......................h.#######",
-  "########################################",
-];
-
+const WATER_CELL = 5, TOXIC_CELL = 6, STAIR_CELL = 7, ELEV_CELL = 8, EXIT_CELL = 9;
 const WALL_CHARS = { "#": 1, "%": 2, "=": 3, "&": 4 };
+const FLOOR_CHARS = { "~": WATER_CELL, "!": TOXIC_CELL, ">": STAIR_CELL, "E": ELEV_CELL, "X": EXIT_CELL };
 const ENEMY_CHARS = {
   g: "groomp", s: "spitter", B: "boss", w: "wraith", c: "skitter",
   u: "brute", e: "watcher", o: "hollow", m: "maw", f: "husk", q: "shrieker",
   d: "demon",
 };
-const EXIT_CELL = 9;
 
-let MW = 0, MH = MAP_STR.length;
-for (const r of MAP_STR) MW = Math.max(MW, r.length);
-const grid = new Uint8Array(MW * MH);
-const startSpawns = {
+// ------------------------------------------------------------ difficulty
+
+const DIFFICULTIES = [
+  { name: "EASY",   desc: "Softer groomps, fatter supply caches.",       hp: 0.7,  dmg: 0.55, speed: 0.9,  density: 0.65, toxic: 4,  cool: 1.35, supply: 1.35 },
+  { name: "NORMAL", desc: "The extermination as contracted.",            hp: 1.0,  dmg: 1.0,  speed: 1.0,  density: 1.0,  toxic: 7,  cool: 1.0,  supply: 1.0 },
+  { name: "HARD",   desc: "They hit harder and think faster.",           hp: 1.15, dmg: 1.4,  speed: 1.12, density: 1.35, toxic: 10, cool: 0.75, supply: 0.85 },
+  { name: "BRUTAL", desc: "Everything is faster than you and knows it.", hp: 1.3,  dmg: 1.9,  speed: 1.25, density: 1.7,  toxic: 14, cool: 0.55, supply: 0.7 },
+];
+let diffIndex = 1, diffSel = 1;
+let DIFF = DIFFICULTIES[diffIndex];
+
+// ---------------------------------------------------------------- worlds
+// The campaign: sixty floors straight down. Each world entry drives both
+// the generator (wall palette, liquid frequency, enemy pool) and the plot
+// screens. Pool entries are [enemy char, weight, first floor it appears].
+
+const LEVELS_PER_WORLD = 20;
+const WORLDS = [
+  {
+    name: "THE GROOMPLEX",
+    tint: "#e03f2a",
+    bossName: "THE OVERGROOMP",
+    wall: "#", accents: ["=", "%"], accentCh: 0.3,
+    water: 0.14, toxic: 0.06,
+    pool: [["g", 10, 0], ["c", 6, 1], ["s", 7, 1], ["d", 4, 6], ["f", 4, 9], ["q", 2, 11], ["u", 2, 13], ["o", 3, 15]],
+    heavies: "uu",
+    intro: [
+      "The Groomplex: a sixty-storey extermination facility,",
+      "built to keep the groomps down where they belong.",
+      "Three days ago, every floor went silent at once.",
+      "Command sent you: one exterminator, two guns on your belt,",
+      "five more lost somewhere below, and a simple contract —",
+      "descend, splatter, repeat. Sixty floors. No backup.",
+    ],
+    outro: [
+      "The Overgroomp bursts like a struck cyst.",
+      "Behind its throne, the freight shaft yawns downward —",
+      "and far below, black water glimmers.",
+      "The infestation didn't start on these floors. It seeped up.",
+    ],
+    levels: [
+      "Reception. The welcome mat is mostly teeth now.",
+      "The armoury. Looted by something with no thumbs.",
+      "Open-plan offices. The partitions didn't help them.",
+      "The cafeteria. Do not read the specials board.",
+      "Laboratory wing. Every sample jar is empty.",
+      "Server floor. The machines still count the dead.",
+      "Storage. Every crate has been chewed from the inside.",
+      "The barracks. Nobody made it to their gun.",
+      "Waste processing. The smell arrives before the floor does.",
+      "Security hub. The Warden's pets have grown attached.",
+      "The atrium. Sixty metres of scream, straight down.",
+      "Hydroponics. The plants are the healthiest thing left.",
+      "Medbay. The quarantine sign was apparently a suggestion.",
+      "The power plant. Half the lights died with the crew.",
+      "The foundry. Something nests in the cold crucibles.",
+      "Archives. The incident reports predate the building.",
+      "Loading docks. All shipments were outbound. Were.",
+      "Cold storage. Things keep down here. Things kept.",
+      "Executive floor. The board locked the door and it held.",
+      "The Overgroomp holds the freight elevator. Take it from him.",
+    ],
+  },
+  {
+    name: "THE SUMP",
+    tint: "#3f9ae0",
+    bossName: "THE SLUDGE KING",
+    wall: "%", accents: ["&", "#"], accentCh: 0.35,
+    water: 0.6, toxic: 0.24,
+    pool: [["g", 7, 0], ["s", 7, 0], ["w", 6, 1], ["o", 6, 3], ["e", 5, 5], ["q", 2, 7], ["m", 4, 9], ["d", 3, 12], ["u", 3, 14]],
+    heavies: "mm",
+    intro: [
+      "The maintenance decks drowned years ago.",
+      "Coolant and groomp-slime stew waist-deep in the dark,",
+      "and something big has been swimming laps down here.",
+      "The pumps still work. Somebody just turned them off.",
+      "Mind the green pools — the sludge eats boots,",
+      "then feet, then whatever you were before the feet.",
+    ],
+    outro: [
+      "The Sludge King deflates like a bad lung.",
+      "In the drained pump-well, a stairwell corkscrews",
+      "down into warm, breathing dark.",
+      "You can hear the whole hive exhale.",
+    ],
+    levels: [
+      "The waterline. Your boots will not be dry again.",
+      "Pump gallery one. The machines drowned mid-scream.",
+      "Filtration. The filters only ever worked one way.",
+      "The cisterns. Something laid eggs in the drinking water.",
+      "Pipeworks. Follow the current. It knows the way down.",
+      "The sluice gates. Opened from the inside.",
+      "Coolant lake. Wade fast, shoot faster.",
+      "The barnacle deck. The walls have opinions now.",
+      "Sump crew quarters. Their boots are still by the bunks.",
+      "The dredging bay. The dredger found something. It's still here.",
+      "Runoff channels. The green water is not water.",
+      "The turbine hall. The blades stopped. The teeth didn't.",
+      "Chemical stores. Everything leaked into everything.",
+      "The undertow. The current has learned to pull.",
+      "Silt beds. Soft floor. Softer things beneath it.",
+      "The drowning stair. Half stairwell, half throat.",
+      "Overflow caverns. The concrete gave up pretending.",
+      "The nursery pools. You know what nurseries mean.",
+      "Pressure lock. The Sump holds its breath here.",
+      "The Sludge King floats in the pump-well. Drain it.",
+    ],
+  },
+  {
+    name: "THE SPAWNING DARK",
+    tint: "#8a3fe0",
+    bossName: "THE GROOMPFATHER",
+    wall: "%", accents: ["&"], accentCh: 0.55,
+    water: 0.08, toxic: 0.5,
+    pool: [["c", 8, 0], ["o", 7, 0], ["f", 6, 0], ["s", 4, 0], ["d", 6, 2], ["q", 3, 3], ["m", 5, 5], ["w", 4, 7], ["u", 5, 9], ["e", 4, 10]],
+    heavies: "ddu",
+    intro: [
+      "No floors down here. No light you didn't bring.",
+      "The walls are wet, and they flinch when you touch them.",
+      "Every groomp ever hatched crawled out of this dark,",
+      "and the sludge runs in veins toward the bottom of it,",
+      "where the Groompfather waits — fat, ancient, and fond",
+      "of every single thing you've splattered on the way down.",
+    ],
+    outro: [
+      "The Groompfather comes apart in one long, grateful sigh.",
+      "The Groomplex above you falls silent — truly silent.",
+      "You take the elevator up. Sixty floors.",
+      "You've earned the ride.",
+    ],
+    levels: [
+      "The first dark. Your lamp is the only sun this place has known.",
+      "Rootways. The Groomplex's foundations, gnawed hollow.",
+      "The chittering span. Cross quietly. They won't.",
+      "Egg galleries. Step where the shells are already broken.",
+      "The warm vents. The whole hive exhales through here.",
+      "Bonefields. Not all of these were groomps.",
+      "The old expedition. Their flares still burn. Green.",
+      "Whoever carried the GBFG this far deep, carried it no further.",
+      "The humming dark. It isn't machinery.",
+      "The brood knot. Cut it out.",
+      "Vein tunnels. The walls pulse in time with something below.",
+      "The shriek gallery. You'll hear why.",
+      "The acid throat. Move quick, breathe shallow.",
+      "The gnawed cathedral. They dug this on purpose.",
+      "The sleeper pits. Some of the pits are still sleeping.",
+      "Skitterling nurseries. Numbers beyond counting.",
+      "The father's larder. Do not take inventory.",
+      "The last stair. Carved for something far wider than you.",
+      "The antechamber. The dark here is thick with waiting.",
+      "The Groompfather. End the bloodline.",
+    ],
+  },
+];
+
+// where the lost guns are found (world:floor, zero-indexed)
+const WEAPON_LEVELS = { "0:1": "3", "0:5": "4", "1:2": "5", "1:11": "6", "2:7": "7" };
+
+// mulberry32 — deterministic per-floor RNG, so every floor is fixed forever
+function mulberry(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Room-and-corridor generator. Layout depends only on (world, floor);
+// enemy and supply counts also read the chosen difficulty.
+function generateLevel(wi, li) {
+  const world = WORLDS[wi];
+  const rng = mulberry(0x9E3779B9 ^ (wi * 7919 + li * 104729 + 17));
+  const isBoss = li === LEVELS_PER_WORLD - 1;
+  const isMini = li === 9;
+  const gw = Math.min(52, 32 + li + wi * 3);
+  const gh = Math.min(34, 24 + (li >> 1) + wi);
+  const cells = [];
+  for (let y = 0; y < gh; y++) cells.push(Array(gw).fill(world.wall));
+
+  const rooms = [];
+  const carve = (x0, y0, w, h) => {
+    for (let y = y0; y < y0 + h; y++) {
+      for (let x = x0; x < x0 + w; x++) {
+        if (x > 0 && y > 0 && x < gw - 1 && y < gh - 1) cells[y][x] = ".";
+      }
+    }
+  };
+  const dig = (x, y) => {
+    if (x > 0 && y > 0 && x < gw - 1 && y < gh - 1 && WALL_CHARS[cells[y][x]]) cells[y][x] = ".";
+  };
+  const corridor = (x0, y0, x1, y1) => {
+    const wide = rng() < 0.35 ? 1 : 0;
+    const hline = (xa, xb, y) => {
+      for (let x = Math.min(xa, xb); x <= Math.max(xa, xb); x++) { dig(x, y); if (wide) dig(x, y + 1); }
+    };
+    const vline = (ya, yb, x) => {
+      for (let y = Math.min(ya, yb); y <= Math.max(ya, yb); y++) { dig(x, y); if (wide) dig(x + 1, y); }
+    };
+    if (rng() < 0.5) { hline(x0, x1, y0); vline(y0, y1, x1); }
+    else { vline(y0, y1, x0); hline(x0, x1, y1); }
+  };
+  const fits = (x, y, w, h) => {
+    if (x < 1 || y < 1 || x + w > gw - 1 || y + h > gh - 1) return false;
+    for (const r of rooms) {
+      if (x < r.x + r.w + 1 && r.x < x + w + 1 && y < r.y + r.h + 1 && r.y < y + h + 1) return false;
+    }
+    return true;
+  };
+  const addRoom = (x, y, w, h) => {
+    carve(x, y, w, h);
+    const room = { x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) };
+    if (rooms.length) {
+      let best = rooms[0], bd = 1e9;
+      for (const r of rooms) {
+        const d = Math.abs(r.cx - room.cx) + Math.abs(r.cy - room.cy);
+        if (d < bd) { bd = d; best = r; }
+      }
+      corridor(room.cx, room.cy, best.cx, best.cy);
+    }
+    rooms.push(room);
+    return room;
+  };
+
+  // start room hugs the west side; the boss arena (if any) the east
+  const sw = 5 + (rng() * 3 | 0), sh = 4 + (rng() * 3 | 0);
+  addRoom(1 + (rng() * 4 | 0), 1 + (rng() * (gh - sh - 2) | 0), sw, sh);
+  if (isBoss) {
+    const aw = Math.min(14, gw - 18), ah = Math.min(11, gh - 4);
+    addRoom(gw - aw - 2, Math.max(1, Math.min(gh - ah - 1, 2 + (rng() * (gh - ah - 3) | 0))), aw, ah);
+  }
+  const wantRooms = 7 + (li >> 2) + (rng() * 3 | 0);
+  for (let t = 0; t < 300 && rooms.length < wantRooms; t++) {
+    const w = 4 + (rng() * 6 | 0), h = 4 + (rng() * 5 | 0);
+    const x = 1 + (rng() * (gw - w - 2) | 0), y = 1 + (rng() * (gh - h - 2) | 0);
+    if (fits(x, y, w, h)) addRoom(x, y, w, h);
+  }
+  // a couple of loop connections so floors aren't pure trees
+  for (let k = 0; k < 2 && rooms.length > 3; k++) {
+    const a = rooms[(rng() * rooms.length) | 0], b = rooms[(rng() * rooms.length) | 0];
+    if (a !== b) corridor(a.cx, a.cy, b.cx, b.cy);
+  }
+
+  // accent wall materials around some rooms
+  for (const room of rooms) {
+    if (rng() >= world.accentCh) continue;
+    const ac = world.accents[(rng() * world.accents.length) | 0];
+    for (let y = room.y - 1; y <= room.y + room.h; y++) {
+      for (let x = room.x - 1; x <= room.x + room.w; x++) {
+        if (x < 0 || y < 0 || x >= gw || y >= gh) continue;
+        if (cells[y][x] !== world.wall) continue;
+        if (y === room.y - 1 || y === room.y + room.h || x === room.x - 1 || x === room.x + room.w) cells[y][x] = ac;
+      }
+    }
+  }
+
+  // liquid pools (walkable): water slows, toxic sludge burns
+  const blob = (room, ch) => {
+    let x = room.x + 1 + (rng() * Math.max(1, room.w - 2) | 0);
+    let y = room.y + 1 + (rng() * Math.max(1, room.h - 2) | 0);
+    let n = 5 + (rng() * 14 | 0);
+    for (let i = 0; i < n * 4 && n > 0; i++) {
+      if (cells[y][x] === ".") { cells[y][x] = ch; n--; }
+      if (rng() < 0.5) x += rng() < 0.5 ? 1 : -1;
+      else y += rng() < 0.5 ? 1 : -1;
+      x = Math.max(room.x + 1, Math.min(room.x + room.w - 2, x));
+      y = Math.max(room.y + 1, Math.min(room.y + room.h - 2, y));
+    }
+  };
+  for (let i = 1; i < rooms.length; i++) {
+    if (rooms[i].w > 3 && rooms[i].h > 3) {
+      if (rng() < world.water) blob(rooms[i], "~");
+      if (rng() < world.toxic) blob(rooms[i], "!");
+    }
+  }
+
+  const put = (room, ch) => {
+    for (let t = 0; t < 30; t++) {
+      const x = room.x + (rng() * room.w | 0), y = room.y + (rng() * room.h | 0);
+      if (cells[y][x] === ".") { cells[y][x] = ch; return true; }
+    }
+    return false;
+  };
+  const pool = world.pool.filter(p => p[2] <= li);
+  let poolW = 0;
+  for (const p of pool) poolW += p[1];
+  const pick = () => {
+    let r = rng() * poolW;
+    for (const p of pool) { r -= p[1]; if (r <= 0) return p[0]; }
+    return pool[0][0];
+  };
+
+  // player, exit, bosses, weapons — placed before the general decoration
+  const start = rooms[0];
+  cells[start.cy][start.cx] = "P";
+  put(start, "l");
+
+  const exitRoom = isBoss ? rooms[1] : rooms.reduce((best, r) => {
+    const d = Math.abs(r.cx - start.cx) + Math.abs(r.cy - start.cy);
+    return d > best.d ? { r, d } : best;
+  }, { r: rooms[rooms.length - 1], d: -1 }).r;
+  const exitCh = isBoss ? "X" : ["X", ">", "E"][li % 3];
+  if (isBoss) {
+    cells[exitRoom.y + 1][exitRoom.x + exitRoom.w - 2] = exitCh;
+    cells[exitRoom.cy][exitRoom.cx] = "B";
+    for (let k = 0; k < 4 + wi * 2; k++) put(exitRoom, pick());
+    put(exitRoom, "h");
+    put(exitRoom, "a");
+    put(exitRoom, "a");
+  } else {
+    cells[exitRoom.cy][exitRoom.cx] = exitCh;
+  }
+  if (isMini) for (const ch of world.heavies) put(exitRoom, ch);
+
+  const wch = WEAPON_LEVELS[wi + ":" + li];
+  if (wch) put(rooms[1 + (rng() * (rooms.length - 1) | 0)], wch);
+  if (li === 0 && wi > 0) {
+    // returning gear for anyone continuing a saved descent mid-campaign
+    const back = wi === 1 ? ["3", "4"] : ["3", "4", "5", "6"];
+    for (const ch of back) put(rooms[1 + (rng() * (rooms.length - 1) | 0)], ch);
+  }
+
+  // enemies, supplies, dressing
+  let meds = 0;
+  for (let i = 1; i < rooms.length; i++) {
+    const room = rooms[i];
+    const dd = Math.abs(room.cx - start.cx) + Math.abs(room.cy - start.cy);
+    let n = Math.round((room.w * room.h) / 15 * (0.75 + li * 0.05 + wi * 0.3) * DIFF.density);
+    if (dd < 9) n = Math.min(n, 1);
+    n = Math.min(n, 7 + wi);
+    if (isBoss && room === exitRoom) n = 0;
+    for (let k = 0; k < n; k++) put(room, pick());
+    if (rng() < 0.5 && put(room, "h")) meds++;
+    if (rng() < 0.6) put(room, "a");
+    if (rng() < 0.12 + li * 0.005) put(room, "A");
+    if (rng() < 0.5) put(room, "b");
+    if (rng() < 0.4) put(room, "k");
+    const lamps = 1 + (rng() * 2 | 0);
+    for (let k = 0; k < lamps; k++) put(room, "l");
+  }
+  for (let t = 0; meds < 2 && t < 10 && rooms.length > 1; t++) {
+    if (put(rooms[1 + (rng() * (rooms.length - 1) | 0)], "h")) meds++;
+  }
+
+  return cells.map(r => r.join(""));
+}
+
+// -------------------------------------------------- map state (per floor)
+
+let MW = 0, MH = 0;
+let grid = new Uint8Array(0);
+let startSpawns = {
   player: { x: 2.5, y: 2.5 },
   enemies: [], pickups: [], barrels: [], lamps: [], skulls: [], weapons: [],
 };
 
-for (let y = 0; y < MH; y++) {
-  const row = MAP_STR[y];
-  for (let x = 0; x < MW; x++) {
-    const ch = x < row.length ? row[x] : "#";
-    if (WALL_CHARS[ch]) { grid[y * MW + x] = WALL_CHARS[ch]; continue; }
-    if (ch === "X") { grid[y * MW + x] = EXIT_CELL; continue; }
-    grid[y * MW + x] = 0;
-    const sx = x + 0.5, sy = y + 0.5;
-    if (ch === "P") startSpawns.player = { x: sx, y: sy };
-    else if (ENEMY_CHARS[ch]) startSpawns.enemies.push({ x: sx, y: sy, type: ENEMY_CHARS[ch] });
-    else if (ch >= "3" && ch <= "7") startSpawns.weapons.push({ x: sx, y: sy, slot: +ch });
-    else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
-    else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
-    else if (ch === "A") startSpawns.pickups.push({ x: sx, y: sy, kind: "armor" });
-    else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
-    else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
-    else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
+function parseMap(rows) {
+  MH = rows.length;
+  MW = 0;
+  for (const r of rows) MW = Math.max(MW, r.length);
+  grid = new Uint8Array(MW * MH);
+  startSpawns = {
+    player: { x: 2.5, y: 2.5 },
+    enemies: [], pickups: [], barrels: [], lamps: [], skulls: [], weapons: [],
+  };
+  for (let y = 0; y < MH; y++) {
+    const row = rows[y];
+    for (let x = 0; x < MW; x++) {
+      const ch = x < row.length ? row[x] : "#";
+      if (WALL_CHARS[ch]) { grid[y * MW + x] = WALL_CHARS[ch]; continue; }
+      if (FLOOR_CHARS[ch]) { grid[y * MW + x] = FLOOR_CHARS[ch]; continue; }
+      grid[y * MW + x] = 0;
+      const sx = x + 0.5, sy = y + 0.5;
+      if (ch === "P") startSpawns.player = { x: sx, y: sy };
+      else if (ENEMY_CHARS[ch]) startSpawns.enemies.push({ x: sx, y: sy, type: ENEMY_CHARS[ch] });
+      else if (ch >= "3" && ch <= "7") startSpawns.weapons.push({ x: sx, y: sy, slot: +ch });
+      else if (ch === "h") startSpawns.pickups.push({ x: sx, y: sy, kind: "health" });
+      else if (ch === "a") startSpawns.pickups.push({ x: sx, y: sy, kind: "ammo" });
+      else if (ch === "A") startSpawns.pickups.push({ x: sx, y: sy, kind: "armor" });
+      else if (ch === "b") startSpawns.barrels.push({ x: sx, y: sy });
+      else if (ch === "l") startSpawns.lamps.push({ x: sx, y: sy });
+      else if (ch === "k") startSpawns.skulls.push({ x: sx, y: sy });
+    }
   }
 }
 
 // ------------------------------------------------------------- lighting
 // Static per-cell light (sector feel): random variance, bright pools under
-// lamps and around the exit. A few cells flicker; lightNow is the per-frame
-// effective value.
+// lamps and around the exits, a faint glow off toxic sludge. A few cells
+// flicker; lightNow is the per-frame effective value. Rebuilt per floor.
 
-const lightGrid = new Float32Array(MW * MH);
-const flickerGrid = new Uint8Array(MW * MH);
-{
-  let s = 0xBADA55;
+let lightGrid = new Float32Array(0);
+let flickerGrid = new Uint8Array(0);
+let lightNow = new Float32Array(0);
+
+function buildLights(seed) {
+  lightGrid = new Float32Array(MW * MH);
+  flickerGrid = new Uint8Array(MW * MH);
+  lightNow = new Float32Array(MW * MH);
+  let s = seed >>> 0 || 0xBADA55;
   const rr = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   for (let i = 0; i < lightGrid.length; i++) {
     lightGrid[i] = 0.8 + rr() * 0.28;
@@ -123,10 +465,14 @@ const flickerGrid = new Uint8Array(MW * MH);
     if (rr() < 0.5) flickerGrid[Math.floor(L.y) * MW + Math.floor(L.x)] = 1 + (rr() * 6 | 0);
   }
   for (let i = 0; i < grid.length; i++) {
-    if (grid[i] === EXIT_CELL) boost(i % MW, (i / MW) | 0, 0.45);
+    const c = grid[i];
+    if (c === EXIT_CELL || c === STAIR_CELL || c === ELEV_CELL) boost(i % MW, (i / MW) | 0, 0.45);
+    else if (c === TOXIC_CELL) {
+      lightGrid[i] = Math.min(1.4, lightGrid[i] + 0.18);
+      if (rr() < 0.3) flickerGrid[i] = 1 + (rr() * 6 | 0);
+    }
   }
 }
-const lightNow = new Float32Array(MW * MH);
 function updateLights() {
   for (let i = 0; i < lightNow.length; i++) {
     const fl = flickerGrid[i];
@@ -145,6 +491,7 @@ function cellAt(cx, cy) {
   return grid[cy * MW + cx];
 }
 function isWall(c) { return c >= 1 && c <= 4; }
+function isLiquid(c) { return c === WATER_CELL || c === TOXIC_CELL; }
 function blockedAt(x, y, r) {
   if (isWall(cellAt(Math.floor(x - r), Math.floor(y - r)))
    || isWall(cellAt(Math.floor(x + r), Math.floor(y - r)))
@@ -209,7 +556,7 @@ let owned = {};
 let curGun = 2;
 let swingT = 0;
 
-let state = "title"; // title | playing | dead | won
+let state = "title"; // title | worldintro | playing | elevator | intermission | dead | won
 let enemies = [], pickups = [], projectiles = [], wpickups = [];
 let barrels = [], explosions = [], particles = [];
 let totalEnemies = 0, kills = 0;
@@ -218,6 +565,13 @@ let shootCool = 0, muzzle = 0, recoil = 0, bobPhase = 0, bobAmt = 0;
 let damageFlash = 0, pickupFlash = 0;
 let msg = "", msgT = 0;
 let showMap = false;
+
+// campaign position + per-floor snapshot (restored when you die and retry)
+let world = 0, level = 0;
+let campKills = 0, campTime = 0;
+let exitKind = "pad";
+let elevT = 0, toxT = 0, splashT = 0;
+let levelSnap = null;
 
 // Polish effects
 let screenShake = 0, shakeX = 0, shakeY = 0;
@@ -229,24 +583,48 @@ let killFlash = 0;
 
 function flash(text) { msg = text; msgT = 2.4; }
 
-function reset() {
-  player.x = startSpawns.player.x;
-  player.y = startSpawns.player.y;
-  player.ang = 0;
+// ------------------------------------------------------- campaign control
+
+function freshLoadout() {
   player.hp = 100;
   player.armor = 0;
   ammoPool = { bullets: 60, shells: 0, rockets: 0, cells: 0 };
   owned = { 1: true, 2: true };
   curGun = 2;
+}
+
+function snapLoadout() {
+  levelSnap = { hp: player.hp, armor: player.armor, ammo: { ...ammoPool }, owned: { ...owned }, gun: curGun };
+}
+
+function restoreLoadout() {
+  if (!levelSnap) return;
+  player.hp = levelSnap.hp;
+  player.armor = levelSnap.armor;
+  ammoPool = { ...levelSnap.ammo };
+  owned = { ...levelSnap.owned };
+  curGun = levelSnap.gun;
+}
+
+function spawnLevel() {
+  player.x = startSpawns.player.x;
+  player.y = startSpawns.player.y;
+  player.ang = 0;
   swingT = 0;
   enemies = startSpawns.enemies.map(s => {
     const st = ENEMY_STATS[s.type];
+    const bossMul = s.type === "boss" ? 1 + world * 0.7 : 1;
     return {
-      type: s.type, x: s.x, y: s.y, hp: st.hp, speed: st.speed, scale: st.scale,
-      r: st.r, melee: st.melee, spit: st.spit, ranged: st.ranged,
+      type: s.type, x: s.x, y: s.y,
+      hp: Math.round(st.hp * DIFF.hp * bossMul),
+      speed: st.speed * DIFF.speed, scale: st.scale,
+      r: st.r,
+      melee: Math.round(st.melee * DIFF.dmg),
+      spit: Math.round(st.spit * DIFF.dmg),
+      ranged: st.ranged,
       proj: st.proj, hover: st.hover, scream: st.scream,
       state: "idle", animT: Math.random() * 9, cool: 0, atkT: 0, painT: 0,
-      deadT: 0, rangedAttack: false,
+      deadT: 0, rangedAttack: false, target: null,
     };
   });
   pickups = startSpawns.pickups.map(p => ({ ...p }));
@@ -261,7 +639,84 @@ function reset() {
   screenShake = shakeX = shakeY = crosshairBloat = weaponSlide = 0;
   hitMarkers = [];
   multiKillT = multiKillCount = killFlash = 0;
+  elevT = 0;
+  toxT = 1.0;
+  splashT = 0;
   startTime = now;
+  flash(WORLDS[world].levels[level]);
+}
+
+function loadLevel(wi, li) {
+  parseMap(generateLevel(wi, li));
+  buildLights(0xBADA55 ^ (wi * 131071 + li * 8191));
+  spawnLevel();
+}
+
+function saveProgress() {
+  try {
+    localStorage.setItem("groomp.save", JSON.stringify({ w: world, l: level, d: diffIndex }));
+  } catch (e) { /* private mode etc. */ }
+}
+
+function loadProgress() {
+  try {
+    const s = JSON.parse(localStorage.getItem("groomp.save"));
+    if (s && s.w >= 0 && s.w < WORLDS.length && s.l >= 0 && s.l < LEVELS_PER_WORLD) return s;
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function startCampaign() {
+  diffIndex = diffSel;
+  DIFF = DIFFICULTIES[diffIndex];
+  world = 0;
+  level = 0;
+  campKills = campTime = 0;
+  freshLoadout();
+  state = "worldintro";
+}
+
+function continueCampaign() {
+  const s = loadProgress();
+  if (!s) return;
+  diffIndex = diffSel = s.d >= 0 && s.d < DIFFICULTIES.length ? s.d : 1;
+  DIFF = DIFFICULTIES[diffIndex];
+  world = s.w;
+  level = s.l;
+  campKills = campTime = 0;
+  freshLoadout();
+  state = "worldintro";
+}
+
+function enterLevel() {
+  loadLevel(world, level);
+  snapLoadout();
+  saveProgress();
+  state = "playing";
+}
+
+function retryLevel() {
+  restoreLoadout();
+  loadLevel(world, level);
+  state = "playing";
+}
+
+function completeLevel(kind) {
+  exitKind = kind;
+  winTime = now - startTime;
+  campKills += kills;
+  campTime += winTime;
+  document.exitPointerLock && document.exitPointerLock();
+  if (world === WORLDS.length - 1 && level === LEVELS_PER_WORLD - 1) {
+    state = "won";
+    try { localStorage.removeItem("groomp.save"); } catch (e) { /* ignore */ }
+    Sfx.win();
+  } else {
+    state = "intermission";
+    if (kind === "elevator") Sfx.ding();
+    else if (kind === "stairs") Sfx.stairs();
+    else Sfx.win();
+  }
 }
 
 // ---------------------------------------------------------------- input
@@ -274,7 +729,18 @@ addEventListener("keydown", e => {
   keys[e.code] = true;
   if (e.code === "KeyM") showMap = !showMap;
   if (e.code === "KeyN" && typeof Sfx !== "undefined") flash(Sfx.toggleMusic() ? "Music on." : "Music off.");
-  if (e.code === "KeyR" && state !== "title") { reset(); state = "playing"; }
+  if (e.code === "KeyR" && (state === "playing" || state === "dead")) retryLevel();
+  if (state === "title") {
+    if (e.code === "ArrowUp" || e.code === "KeyW") diffSel = (diffSel + DIFFICULTIES.length - 1) % DIFFICULTIES.length;
+    if (e.code === "ArrowDown" || e.code === "KeyS") diffSel = (diffSel + 1) % DIFFICULTIES.length;
+    if (e.code.startsWith("Digit")) {
+      const d = +e.code.slice(5);
+      if (d >= 1 && d <= DIFFICULTIES.length) diffSel = d - 1;
+    }
+    if (e.code === "Enter" || e.code === "Space") { Sfx.init(); startCampaign(); }
+    if (e.code === "KeyC") { Sfx.init(); continueCampaign(); }
+    return;
+  }
   if (e.code.startsWith("Digit")) {
     const slot = +e.code.slice(5);
     if (slot >= 1 && slot <= 7 && owned[slot] && slot !== curGun && state === "playing") {
@@ -296,18 +762,31 @@ canvas.addEventListener("wheel", e => {
 });
 addEventListener("keyup", e => { keys[e.code] = false; });
 
+function grabPointer() {
+  if (document.pointerLockElement !== canvas && canvas.requestPointerLock) canvas.requestPointerLock();
+}
+
 canvas.addEventListener("mousedown", e => {
   if (e.button !== 0) return;
   Sfx.init();
-  if (state !== "playing") {
-    reset();
-    state = "playing";
-    canvas.requestPointerLock && canvas.requestPointerLock();
+  if (state === "title") { startCampaign(); return; }
+  if (state === "worldintro") { enterLevel(); grabPointer(); return; }
+  if (state === "intermission") {
+    if (level === LEVELS_PER_WORLD - 1) {
+      world++;
+      level = 0;
+      state = "worldintro";
+    } else {
+      level++;
+      enterLevel();
+      grabPointer();
+    }
     return;
   }
-  if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
-    canvas.requestPointerLock();
-  }
+  if (state === "dead") { retryLevel(); grabPointer(); return; }
+  if (state === "won") { state = "title"; return; }
+  if (state === "elevator") return;
+  grabPointer();
   mouseDown = true;
 });
 addEventListener("mouseup", () => { mouseDown = false; });
@@ -383,29 +862,40 @@ function explodeBarrel(b) {
   explodeAt(b.x, b.y, 2.2, 95);
 }
 
-function damageEnemy(e, dmg) {
+// `attacker` set to another enemy means friendly fire — the victim turns on
+// whoever hit it, Doom-style infighting.
+function damageEnemy(e, dmg, attacker) {
   e.hp -= dmg;
   spawnParticles(e.x, e.y, 0.35, "blood", 7, 1.6);
+  const infight = attacker && attacker !== e && attacker.state !== "dead";
+  if (infight) {
+    e.target = attacker;
+    if (e.hp > 0 && Math.random() < 0.1) flash("The groomps turn on each other!");
+  }
   if (e.state === "idle") { e.state = "chase"; Sfx.growl(); }
   const isKill = e.hp <= 0;
-  hitMarkers.push({ t: isKill ? 0.5 : 0.28, kill: isKill });
-  if (hitMarkers.length > 4) hitMarkers.shift();
+  if (!infight) {
+    hitMarkers.push({ t: isKill ? 0.5 : 0.28, kill: isKill });
+    if (hitMarkers.length > 4) hitMarkers.shift();
+  }
   if (e.hp <= 0) {
     e.state = "dead";
     e.deadT = 0;
     kills++;
-    killFlash = 0.12;
-    if (multiKillT > 0) {
-      multiKillCount++;
-      const mkMsgs = ["DOUBLE KILL!", "TRIPLE KILL!", "RAMPAGE!", "MASSACRE!", "UNSTOPPABLE!"];
-      flash(mkMsgs[Math.min(4, multiKillCount - 1)]);
-    } else {
-      multiKillCount = 1;
+    if (!infight) {
+      killFlash = 0.12;
+      if (multiKillT > 0) {
+        multiKillCount++;
+        const mkMsgs = ["DOUBLE KILL!", "TRIPLE KILL!", "RAMPAGE!", "MASSACRE!", "UNSTOPPABLE!"];
+        flash(mkMsgs[Math.min(4, multiKillCount - 1)]);
+      } else {
+        multiKillCount = 1;
+      }
+      multiKillT = 2.8;
     }
-    multiKillT = 2.8;
     Sfx.enemyDie();
-    if (kills === totalEnemies) flash("All groomps splattered! Find the exit pad.");
-    else if (e.type === "boss") flash("The Groompfather has fallen!");
+    if (e.type === "boss") flash(`${WORLDS[world].bossName} HAS FALLEN!`);
+    else if (kills === totalEnemies) flash("All groomps splattered! Find the way down.");
   } else if (Math.random() < 0.7) {
     e.state = "pain";
     e.painT = 0.22;
@@ -501,14 +991,14 @@ function tryShoot() {
   }
 }
 
-function spawnSpit(e) {
-  const dx = player.x - e.x, dy = player.y - e.y;
+function spawnSpit(e, T) {
+  const dx = T.x - e.x, dy = T.y - e.y;
   const d = Math.hypot(dx, dy) || 1;
   const speed = e.proj === "fire" ? 4.6 : 5.2;
   projectiles.push({
     x: e.x + (dx / d) * 0.5, y: e.y + (dy / d) * 0.5,
     dx: (dx / d) * speed, dy: (dy / d) * speed,
-    dmg: e.spit, kind: e.proj || "spit", hostile: true,
+    dmg: e.spit, kind: e.proj || "spit", hostile: true, src: e,
   });
   Sfx.spit();
 }
@@ -517,9 +1007,12 @@ function spawnSpit(e) {
 
 function updateEnemy(e, dt) {
   if (e.state === "dead") { e.deadT += dt; return; }
-  const dx = player.x - e.x, dy = player.y - e.y;
+  // infight target if one is set and still breathing, the player otherwise
+  if (e.target && e.target.state === "dead") e.target = null;
+  const T = e.target || player;
+  const dx = T.x - e.x, dy = T.y - e.y;
   const dist = Math.hypot(dx, dy);
-  const seen = dist < 14 && los(e.x, e.y, player.x, player.y);
+  const seen = dist < 14 && los(e.x, e.y, T.x, T.y);
   e.cool -= dt;
 
   if (e.state === "idle") {
@@ -546,11 +1039,12 @@ function updateEnemy(e, dt) {
     e.atkT -= dt;
     if (e.atkT <= 0) {
       if (e.rangedAttack) {
-        if (seen) spawnSpit(e);
-      } else if (dist < 1.6) {
-        damagePlayer(e.melee + (Math.random() * 5 | 0));
+        if (seen) spawnSpit(e, T);
+      } else if (dist < 1.8) {
+        if (e.target) damageEnemy(e.target, e.melee + (Math.random() * 5 | 0), e);
+        else damagePlayer(e.melee + (Math.random() * 5 | 0));
       }
-      e.cool = e.type === "boss" ? 0.8 : 1.1 + Math.random() * 0.5;
+      e.cool = (e.type === "boss" ? 0.8 : 1.1 + Math.random() * 0.5) * DIFF.cool;
       e.state = "chase";
     }
     return;
@@ -558,7 +1052,7 @@ function updateEnemy(e, dt) {
 
   // chase
   e.animT += dt;
-  const canMelee = e.melee > 0 && dist < 1.25;
+  const canMelee = e.melee > 0 && dist < 1.25 + (e.target ? e.target.r : 0);
   const canSpit = e.ranged && seen && dist > 2 && dist < 9;
   if (e.cool <= 0 && (canMelee || canSpit)) {
     e.state = "attack";
@@ -568,7 +1062,8 @@ function updateEnemy(e, dt) {
   }
   const holdRange = e.type === "spitter" && seen && dist < 4.5;
   if (!holdRange && dist > 0.8) {
-    const step = e.speed * dt;
+    let step = e.speed * dt;
+    if (isLiquid(cellAt(Math.floor(e.x), Math.floor(e.y)))) step *= 0.6;
     tryMove(e, (dx / dist) * step, (dy / dist) * step, e.r);
   }
 }
@@ -618,6 +1113,13 @@ function update(dt) {
     if (hitMarkers[i].t <= 0) hitMarkers.splice(i, 1);
   }
 
+  if (state === "elevator") {
+    // ride down: rumble, fade, then the next floor
+    elevT += dt;
+    screenShake = Math.min(0.3, screenShake + dt * 0.5);
+    if (elevT >= 1.5) completeLevel("elevator");
+    return;
+  }
   if (state !== "playing") return;
 
   // turning (keyboard)
@@ -629,11 +1131,14 @@ function update(dt) {
   planeX = -dirY * FOV;
   planeY = dirX * FOV;
 
-  // movement
+  // movement — wading through liquid is slow and loud
+  const pcell = cellAt(Math.floor(player.x), Math.floor(player.y));
+  const inLiquid = isLiquid(pcell);
   const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const run = keys.ShiftLeft || keys.ShiftRight;
   let speed = (run ? 5.0 : 3.2) * dt;
+  if (inLiquid) speed *= 0.55;
   if (fwd && str) speed *= 0.7071;
   if (fwd || str) {
     tryMove(player,
@@ -643,8 +1148,26 @@ function update(dt) {
     bobPhase += speed * 2.6;
     bobAmt = Math.min(1, bobAmt + dt * 6);
     crosshairBloat = Math.min(1, crosshairBloat + bobAmt * dt * 2.2);
+    if (inLiquid) {
+      splashT -= dt * (run ? 1.6 : 1);
+      if (splashT <= 0) { Sfx.splash(); splashT = 0.55; }
+    }
   } else {
     bobAmt = Math.max(0, bobAmt - dt * 4);
+  }
+
+  // toxic sludge burns on a tick; the rate comes from the difficulty
+  if (pcell === TOXIC_CELL) {
+    toxT -= dt;
+    if (toxT <= 0) {
+      toxT = 0.65;
+      Sfx.sizzle();
+      damagePlayer(DIFF.toxic);
+      if (state !== "playing") return; // the sludge got you
+      if (Math.random() < 0.3) flash("The sludge burns!");
+    }
+  } else {
+    toxT = Math.min(toxT, 0.35);
   }
 
   if (mouseDown || keys.Space) tryShoot();
@@ -683,6 +1206,25 @@ function update(dt) {
         if (Math.hypot(p.x - player.x, p.y - player.y) < 0.4) {
           damagePlayer(p.dmg);
           hit = true;
+        } else {
+          // stray monster fire hits other monsters — and starts infights
+          for (const e of enemies) {
+            if (e === p.src || e.state === "dead") continue;
+            if (Math.hypot(p.x - e.x, p.y - e.y) < e.r + 0.2) {
+              damageEnemy(e, p.dmg, p.src);
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) {
+            for (const b of barrels) {
+              if (b.alive && Math.hypot(p.x - b.x, p.y - b.y) < 0.5) {
+                hitBarrel(b, p.dmg);
+                hit = true;
+                break;
+              }
+            }
+          }
         }
       } else {
         for (const e of enemies) {
@@ -715,17 +1257,17 @@ function update(dt) {
     if (Math.hypot(p.x - player.x, p.y - player.y) > 0.6) continue;
     if (p.kind === "health") {
       if (player.hp >= 100) continue;
-      player.hp = Math.min(100, player.hp + 25);
+      player.hp = Math.min(100, player.hp + Math.round(25 * DIFF.supply));
       flash("Picked up a medkit.");
     } else if (p.kind === "armor") {
       if (player.armor >= 100) continue;
       player.armor = Math.min(100, player.armor + 50);
       flash("Picked up groomp-plate armor.");
     } else {
-      ammoPool.bullets = Math.min(AMMO_MAX.bullets, ammoPool.bullets + 20);
-      ammoPool.shells = Math.min(AMMO_MAX.shells, ammoPool.shells + 4);
+      ammoPool.bullets = Math.min(AMMO_MAX.bullets, ammoPool.bullets + Math.round(20 * DIFF.supply));
+      ammoPool.shells = Math.min(AMMO_MAX.shells, ammoPool.shells + Math.round(4 * DIFF.supply));
       ammoPool.rockets = Math.min(AMMO_MAX.rockets, ammoPool.rockets + 1);
-      ammoPool.cells = Math.min(AMMO_MAX.cells, ammoPool.cells + 20);
+      ammoPool.cells = Math.min(AMMO_MAX.cells, ammoPool.cells + Math.round(20 * DIFF.supply));
       flash("Picked up an ammo cache.");
     }
     pickups.splice(i, 1);
@@ -747,11 +1289,18 @@ function update(dt) {
     Sfx.pickup();
   }
 
-  if (cellAt(Math.floor(player.x), Math.floor(player.y)) === EXIT_CELL) {
-    state = "won";
-    winTime = now - startTime;
-    Sfx.win();
-    document.exitPointerLock && document.exitPointerLock();
+  // three ways down: the exit pad, the stairs, or the elevator ride
+  const onCell = cellAt(Math.floor(player.x), Math.floor(player.y));
+  if (onCell === EXIT_CELL) {
+    completeLevel("pad");
+  } else if (onCell === STAIR_CELL) {
+    Sfx.stairs();
+    completeLevel("stairs");
+  } else if (onCell === ELEV_CELL) {
+    state = "elevator";
+    elevT = 0;
+    mouseDown = false;
+    Sfx.elevator();
   }
 }
 
@@ -788,6 +1337,10 @@ const LIT_WALLS_B = WALL_TEX_B.map(t => (t ? buildLit(t) : null));
 const LIT_FLOOR = buildLit(texFloor);
 const LIT_CEIL = buildLit(texCeil);
 const LIT_EXIT = buildLit(texExitFloor);
+const LIT_WATER = [buildLit(texWater), buildLit(texWater2)];
+const LIT_TOXIC = [buildLit(texToxic), buildLit(texToxic2)];
+const LIT_STAIRS = buildLit(texStairs);
+const LIT_ELEV = buildLit(texElevator);
 function litIndex(f) {
   const i = (f * SHADES) | 0;
   return i >= SHADES ? SHADES - 1 : i < 0 ? 0 : i;
@@ -799,6 +1352,7 @@ function renderFloors() {
   const rx1 = dirX + planeX, ry1 = dirY + planeY;
   const halfH = H / 2;
   const exitPulse = 0.75 + 0.25 * Math.sin(now * 5);
+  const liqFrame = ((now * 2.6) | 0) % 2; // two-frame liquid animation
   for (let y = halfH + 1; y < H; y++) {
     const rowDist = halfH / (y - halfH);
     const stepX = rowDist * (rx1 - rx0) / W;
@@ -808,10 +1362,9 @@ function renderFloors() {
     const f = fog(rowDist) * 0.95;
     let floorTex = LIT_FLOOR[litIndex(f)];
     let ceilTex = LIT_CEIL[litIndex(f * 0.85)];
-    const exitTex = LIT_EXIT[litIndex(Math.min(1, f + 0.5) * exitPulse)];
     const rowF = y * W;
     const rowC = (H - y - 1) * W;
-    let lcx = -1e9, lcy = -1e9, exit = false;
+    let lcx = -1e9, lcy = -1e9;
     // sample every other column and write pixel pairs: at this resolution
     // the difference is invisible and it halves the cost of the hot loop
     const stepX2 = stepX * 2, stepY2 = stepY * 2;
@@ -820,13 +1373,18 @@ function renderFloors() {
       if (cx !== lcx || cy !== lcy) {
         lcx = cx;
         lcy = cy;
-        exit = cellAt(cx, cy) === EXIT_CELL;
+        const c = cellAt(cx, cy);
         const lv = lightAt(cx, cy);
-        floorTex = LIT_FLOOR[litIndex(f * lv)];
         ceilTex = LIT_CEIL[litIndex(f * 0.85 * lv)];
+        if (c === EXIT_CELL) floorTex = LIT_EXIT[litIndex(Math.min(1, f + 0.5) * exitPulse)];
+        else if (c === WATER_CELL) floorTex = LIT_WATER[liqFrame][litIndex(f * lv)];
+        else if (c === TOXIC_CELL) floorTex = LIT_TOXIC[liqFrame][litIndex(Math.min(1, f * lv + 0.18))];
+        else if (c === STAIR_CELL) floorTex = LIT_STAIRS[litIndex(Math.min(1, f * lv + 0.15))];
+        else if (c === ELEV_CELL) floorTex = LIT_ELEV[litIndex(Math.min(1, (f * lv + 0.3) * exitPulse))];
+        else floorTex = LIT_FLOOR[litIndex(f * lv)];
       }
       const ti = (((fy - cy) * TEXN) | 0) * TEXN + (((fx - cx) * TEXN) | 0);
-      const pf = (exit ? exitTex : floorTex)[ti];
+      const pf = floorTex[ti];
       const pc = ceilTex[ti];
       buf[rowF + x] = pf;
       buf[rowF + x + 1] = pf;
@@ -903,7 +1461,9 @@ function renderSprites() {
   const px = player.x, py = player.y;
   const list = [];
   for (const e of enemies) {
-    const u = e.hover && e.state !== "dead" ? 0.08 + 0.05 * Math.sin(now * 2.6 + e.animT * 4) : 0;
+    let u = e.hover && e.state !== "dead" ? 0.08 + 0.05 * Math.sin(now * 2.6 + e.animT * 4) : 0;
+    // waders sit low in the liquid; corpses sink further
+    if (!e.hover && isLiquid(cellAt(Math.floor(e.x), Math.floor(e.y)))) u = e.state === "dead" ? -0.16 : -0.09;
     list.push({ x: e.x, y: e.y, tex: enemyTexture(e), scale: e.scale, u });
   }
   for (const p of pickups) list.push({ x: p.x, y: p.y, tex: p.kind === "health" ? SPR_HEALTH : p.kind === "armor" ? SPR_ARMOR : SPR_AMMO, scale: 0.55, u: 0 });
@@ -1262,7 +1822,10 @@ function drawMinimap() {
   const ox = 10, oy = 10;
   ctx.fillStyle = "rgba(10,10,14,0.72)";
   ctx.fillRect(ox - 3, oy - 3, MW * sc + 6, MH * sc + 6);
-  const colors = { 1: "#7a3328", 2: "#5c6166", 3: "#3c4258", 4: "#3a7a26", 9: "#37e065" };
+  const colors = {
+    1: "#7a3328", 2: "#5c6166", 3: "#3c4258", 4: "#3a7a26",
+    5: "#1e5c8a", 6: "#4a9a1e", 7: "#b0a890", 8: "#c8a018", 9: "#37e065",
+  };
   for (let y = 0; y < MH; y++) {
     for (let x = 0; x < MW; x++) {
       const c = grid[y * MW + x];
@@ -1294,7 +1857,7 @@ function drawCenteredPanel(lines) {
   ctx.fillRect(0, 0, LW, LH);
   ctx.textAlign = "center";
   let y = lines.titleY || 130;
-  ctx.font = "bold 76px monospace";
+  ctx.font = `bold ${lines.titleSize || 76}px monospace`;
   ctx.fillStyle = "#5a0d08";
   ctx.fillText(lines.title, LW / 2 + 4, y + 4);
   ctx.fillStyle = lines.titleColor || "#e03f2a";
@@ -1373,6 +1936,26 @@ function render() {
     ctx.fillStyle = `rgba(255,255,190,${killFlash * 0.28})`;
     ctx.fillRect(0, 0, LW, LH - HUD_H);
   }
+  if (state === "playing" || state === "elevator") {
+    // wading tint
+    const pc = cellAt(Math.floor(player.x), Math.floor(player.y));
+    if (pc === WATER_CELL) {
+      ctx.fillStyle = "rgba(30,90,140,0.10)";
+      ctx.fillRect(0, 0, LW, LH - HUD_H);
+    } else if (pc === TOXIC_CELL) {
+      ctx.fillStyle = `rgba(90,160,20,${0.1 + 0.05 * Math.sin(now * 6)})`;
+      ctx.fillRect(0, 0, LW, LH - HUD_H);
+    }
+  }
+  if (state === "elevator") {
+    const a = Math.min(1, elevT / 1.4);
+    ctx.fillStyle = `rgba(0,0,0,${a * a * 0.96})`;
+    ctx.fillRect(0, 0, LW, LH);
+    ctx.textAlign = "center";
+    ctx.font = "bold 18px monospace";
+    ctx.fillStyle = `rgba(232,200,64,${0.55 + 0.45 * Math.sin(now * 9)})`;
+    ctx.fillText("DESCENDING...", LW / 2, LH / 2 - 20);
+  }
   if (pickupFlash > 0) {
     ctx.fillStyle = `rgba(220,200,60,${Math.min(0.25, pickupFlash)})`;
     ctx.fillRect(0, 0, LW, LH - HUD_H);
@@ -1416,55 +1999,147 @@ function render() {
     ctx.fillStyle = `rgba(230,220,180,${Math.min(1, msgT)})`;
     ctx.fillText(msg, LW / 2, 30);
   }
-  if (state === "playing") {
-    ctx.textAlign = "right";
+  if (state === "playing" || state === "elevator") {
     ctx.font = "10px monospace";
     ctx.fillStyle = "rgba(220,200,160,0.55)";
+    ctx.textAlign = "right";
     ctx.fillText(`KILLS ${kills}/${totalEnemies}`, LW - 10, 16);
+    if (!showMap) {
+      ctx.textAlign = "left";
+      ctx.fillText(`${WORLDS[world].name} · FLOOR ${level + 1}/${LEVELS_PER_WORLD} · ${DIFF.name}`, 10, 16);
+    }
     ctx.textAlign = "center";
   }
 
   if (state === "title") {
+    drawTitle();
+  } else if (state === "worldintro") {
+    const w = WORLDS[world];
     drawCenteredPanel({
-      title: "GROOMP",
-      titleColor: "#e03f2a",
+      title: w.name,
+      titleColor: w.tint,
+      titleSize: 42,
+      titleY: 96,
       body: [
-        "The Groomplex is overrun. Things scuttle, float and shriek",
-        "in the dark. You have a blaster, bad intentions, and no backup.",
-        "Five more guns are lost somewhere inside. Find them.",
+        ...w.intro,
         "",
-        "WASD move · mouse / arrows turn · click / space shoot",
-        "1-7 / wheel switch weapon · shift run",
-        "M map · N music · R restart",
+        `FLOOR ${level + 1} OF ${LEVELS_PER_WORLD} · DIFFICULTY: ${DIFF.name}`,
       ],
-      prompt: "CLICK TO ENTER THE GROOMPLEX",
+      prompt: "CLICK TO DESCEND",
+    });
+  } else if (state === "intermission") {
+    const w = WORLDS[world];
+    const bossFloor = level === LEVELS_PER_WORLD - 1;
+    const exitLine = {
+      pad: "The exit pad hums you down a floor.",
+      stairs: "You take the stairs, two at a time.",
+      elevator: "The elevator grinds down into the dark.",
+    }[exitKind];
+    drawCenteredPanel({
+      title: "FLOOR CLEARED",
+      titleColor: "#3fe06a",
+      titleSize: 50,
+      titleY: 92,
+      body: [
+        `${w.name} — FLOOR ${level + 1}`,
+        "",
+        `Groomps splattered: ${kills} / ${totalEnemies}`,
+        `Time: ${fmtTime(winTime)}`,
+        "",
+        ...(bossFloor ? w.outro : [exitLine, "", "NEXT: " + w.levels[level + 1]]),
+      ],
+      prompt: bossFloor ? `CLICK TO ENTER ${WORLDS[world + 1].name}` : "CLICK TO CONTINUE",
     });
   } else if (state === "dead") {
     drawCenteredPanel({
       title: "GROOMPED",
       titleColor: "#c92a14",
       body: [
+        `${WORLDS[world].name} — FLOOR ${level + 1} · ${DIFF.name}`,
+        "",
         `You splattered ${kills} of ${totalEnemies} groomps`,
         "before becoming one with the ooze.",
+        "The floor keeps what it kills — your gear does not.",
       ],
-      prompt: "CLICK TO TRY AGAIN",
+      prompt: "CLICK TO RETRY THE FLOOR",
     });
   } else if (state === "won") {
     drawCenteredPanel({
-      title: "CLEANSED",
+      title: "BLOODLINE ENDED",
       titleColor: "#3fe06a",
+      titleSize: 46,
+      titleY: 92,
       body: [
-        "You escaped the Groomplex.",
+        ...WORLDS[2].outro,
         "",
-        `Groomps splattered: ${kills} / ${totalEnemies}`,
-        `Time: ${fmtTime(winTime)}`,
-        kills === totalEnemies ? "FLAWLESS EXTERMINATION!" : "Some groomps still squelch in the dark...",
+        `Difficulty: ${DIFF.name}`,
+        `Groomps splattered: ${campKills}`,
+        `Total time below: ${fmtTime(campTime)}`,
       ],
-      prompt: "CLICK TO PLAY AGAIN",
+      prompt: "CLICK FOR TITLE",
     });
   }
 
   ctx.restore();
+}
+
+function drawTitle() {
+  ctx.fillStyle = "rgba(8,8,12,0.82)";
+  ctx.fillRect(0, 0, LW, LH);
+  ctx.textAlign = "center";
+  ctx.font = "bold 72px monospace";
+  ctx.fillStyle = "#5a0d08";
+  ctx.fillText("GROOMP", LW / 2 + 4, 88 + 4);
+  ctx.fillStyle = "#e03f2a";
+  ctx.fillText("GROOMP", LW / 2, 88);
+  ctx.font = "bold 13px monospace";
+  ctx.fillStyle = "#8a93a2";
+  ctx.fillText("S I X T Y   F L O O R S   D O W N", LW / 2, 112);
+
+  ctx.font = "13px monospace";
+  ctx.fillStyle = "#c9c9d0";
+  const teaser = [
+    "The Groomplex extermination facility has gone silent.",
+    "Sixty floors of groomps between you and whatever breeds them.",
+    "Three worlds. Twenty floors each. One exterminator.",
+  ];
+  let y = 140;
+  for (const l of teaser) { ctx.fillText(l, LW / 2, y); y += 17; }
+
+  y = 212;
+  ctx.font = "bold 13px monospace";
+  ctx.fillStyle = "#8a93a2";
+  ctx.fillText("— CHOOSE YOUR EXTERMINATION —", LW / 2, y);
+  y += 22;
+  for (let i = 0; i < DIFFICULTIES.length; i++) {
+    const D = DIFFICULTIES[i];
+    const sel = i === diffSel;
+    if (sel) {
+      ctx.fillStyle = "rgba(232,200,64,0.14)";
+      ctx.fillRect(LW / 2 - 200, y - 12, 400, 18);
+    }
+    ctx.font = sel ? "bold 14px monospace" : "13px monospace";
+    ctx.fillStyle = sel ? "#e8c840" : "#9aa0ac";
+    ctx.fillText((sel ? "▶ " : "") + D.name + " — " + D.desc, LW / 2, y);
+    y += 21;
+  }
+
+  const save = loadProgress();
+  if (save) {
+    ctx.font = "12px monospace";
+    ctx.fillStyle = "#7ac8e0";
+    ctx.fillText(
+      `[C] CONTINUE — ${WORLDS[save.w].name}, FLOOR ${save.l + 1} (${DIFFICULTIES[save.d] ? DIFFICULTIES[save.d].name : "NORMAL"})`,
+      LW / 2, y + 10);
+  }
+
+  ctx.font = "11px monospace";
+  ctx.fillStyle = "#6c7280";
+  ctx.fillText("WASD move · mouse turn · click shoot · 1-7 weapons · shift run · M map · N music · R retry floor", LW / 2, LH - 78);
+
+  ctx.font = "bold 18px monospace";
+  ctx.fillStyle = 0.5 + 0.5 * Math.sin(now * 4) > 0.5 ? "#e0c63f" : "#8a7a28";
+  ctx.fillText("↑ ↓ DIFFICULTY · CLICK TO DESCEND", LW / 2, LH - 52);
 }
 
 // ----------------------------------------------------------------- loop
@@ -1483,7 +2158,9 @@ function frame(t) {
   requestAnimationFrame(frame);
 }
 
-reset();
+// boot: load floor one so the title screen has a world behind it
+freshLoadout();
+loadLevel(0, 0);
 requestAnimationFrame(frame);
 
 if (location.hash === "#debug") {
@@ -1492,6 +2169,17 @@ if (location.hash === "#debug") {
     get enemies() { return enemies; },
     get state() { return state; },
     set state(s) { state = s; },
+    get world() { return world; },
+    get level() { return level; },
+    get map() { return { w: MW, h: MH }; },
+    cellAt,
+    goto(wi, li, di) {
+      if (di >= 0 && di < DIFFICULTIES.length) { diffIndex = diffSel = di; DIFF = DIFFICULTIES[diffIndex]; }
+      world = Math.max(0, Math.min(WORLDS.length - 1, wi));
+      level = Math.max(0, Math.min(LEVELS_PER_WORLD - 1, li));
+      freshLoadout();
+      enterLevel();
+    },
   };
 }
 

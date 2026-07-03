@@ -307,6 +307,89 @@ const texExitFloor = makePixels(g => {
   addNoise(g, 10);
 });
 
+// animated liquid floors: two frames each, the highlight bands shift between
+// frames so the surface appears to roll
+function drawLiquid(g, phase, deep, mid, lite, glint, bubbles) {
+  g.fillStyle = deep;
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, mid, 0.3);
+  for (let y = 0; y < 64; y += 4) {
+    for (let x = 0; x < 64; x++) {
+      const v = Math.sin((x / 64) * Math.PI * 4 + y * 0.6 + phase);
+      if (v > 0.55) { g.fillStyle = mid; g.fillRect(x, y + ((v * 3) | 0) % 4, 1, 1); }
+      if (v > 0.86) { g.fillStyle = lite; g.fillRect(x, y + ((v * 3) | 0) % 4, 1, 1); }
+    }
+  }
+  for (let i = 0; i < 22; i++) {
+    const x = (rnd() * 62) | 0, y = (rnd() * 62) | 0;
+    g.fillStyle = rnd() < 0.3 ? glint : lite;
+    g.fillRect(x, y, 1 + (rnd() * 2 | 0), 1);
+  }
+  if (bubbles) {
+    for (let i = 0; i < 12; i++) {
+      const x = (rnd() * 60) | 0, y = (rnd() * 60) | 0;
+      g.fillStyle = lite;
+      g.fillRect(x, y, 2, 2);
+      g.fillStyle = glint;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+}
+const texWater = makePixels(g => drawLiquid(g, 0, "#0b2136", "#164a66", "#2f7fa6", "#8ed2ea", false));
+const texWater2 = makePixels(g => drawLiquid(g, 2.4, "#0b2136", "#164a66", "#2f7fa6", "#8ed2ea", false));
+const texToxic = makePixels(g => drawLiquid(g, 0, "#12300a", "#2c5a10", "#55a018", "#c8f060", true));
+const texToxic2 = makePixels(g => drawLiquid(g, 2.4, "#12300a", "#2c5a10", "#55a018", "#c8f060", true));
+
+// stone steps descending toward the far edge, worn down the middle
+const texStairs = makePixels(g => {
+  for (let s = 0; s < 8; s++) {
+    const v = 122 - s * 11;
+    g.fillStyle = `rgb(${v - 6},${v},${v - 8})`;
+    g.fillRect(0, s * 8, 64, 8);
+    g.fillStyle = "rgba(255,255,255,0.25)";
+    g.fillRect(0, s * 8, 64, 1);
+    g.fillStyle = "rgba(0,0,0,0.45)";
+    g.fillRect(0, s * 8 + 7, 64, 1);
+  }
+  dither(g, 0, 0, 64, 64, "#000000", 0.07);
+  dither(g, 22, 0, 20, 64, "#5c5c52", 0.1);
+});
+
+// elevator platform: treadplate, hazard border, glowing down-chevrons
+const texElevator = makePixels(g => {
+  g.fillStyle = "#2a2e36";
+  g.fillRect(0, 0, 64, 64);
+  dither(g, 0, 0, 64, 64, "#232730", 0.3);
+  g.fillStyle = "#3c424e";
+  for (let y = 8; y < 58; y += 8) {
+    for (let x = 8 + ((y >> 3) & 1) * 4; x < 58; x += 8) {
+      g.fillRect(x, y, 3, 1);
+      g.fillRect(x + 1, y - 1, 1, 3);
+    }
+  }
+  for (let i = 0; i < 64; i++) {
+    g.fillStyle = ((i >> 2) & 1) ? "#c8a018" : "#15151a";
+    g.fillRect(i, 0, 1, 4);
+    g.fillRect(i, 60, 1, 4);
+    g.fillRect(0, i, 4, 1);
+    g.fillRect(60, i, 4, 1);
+  }
+  g.fillStyle = "#e8c840";
+  for (let k = 0; k < 2; k++) {
+    const y = 20 + k * 14;
+    g.beginPath();
+    g.moveTo(20, y);
+    g.lineTo(32, y + 10);
+    g.lineTo(44, y);
+    g.lineTo(44, y + 4);
+    g.lineTo(32, y + 14);
+    g.lineTo(20, y + 4);
+    g.closePath();
+    g.fill();
+  }
+  addNoise(g, 8);
+});
+
 const WALL_TEX = [null, texPanel, texBrick, texTech, texSlime];
 const WALL_TEX_B = [null, texPanelB, texBrickB, null, null];
 

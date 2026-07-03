@@ -133,5 +133,27 @@ const Sfx = (() => {
     win() {
       [523, 659, 784, 1047].forEach((f, i) => blip("square", f, f, 0.22, 0.25, i * 0.13));
     },
+    splash() {
+      noiseBurst(0.18, 0.25, 800);
+      blip("sine", 320, 90, 0.14, 0.12);
+    },
+    sizzle() {
+      noiseBurst(0.2, 0.18, 4200);
+      blip("sawtooth", 220, 140, 0.18, 0.08);
+    },
+    stairs() {
+      blip("square", 220, 140, 0.1, 0.2);
+      blip("square", 180, 110, 0.1, 0.2, 0.12);
+      blip("square", 150, 90, 0.12, 0.2, 0.24);
+    },
+    elevator() {
+      blip("sawtooth", 46, 40, 1.4, 0.35);
+      blip("square", 92, 78, 1.3, 0.12, 0.05);
+      noiseBurst(0.5, 0.12, 300);
+    },
+    ding() {
+      blip("sine", 1180, 1180, 0.3, 0.2);
+      blip("sine", 1570, 1570, 0.25, 0.12, 0.02);
+    },
   };
 })();
