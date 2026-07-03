@@ -394,531 +394,54 @@ const WALL_TEX = [null, texPanel, texBrick, texTech, texSlime];
 const WALL_TEX_B = [null, texPanelB, texBrickB, null, null];
 
 // ---------------------------------------------------------------- enemies
-// Doom-inspired bestiary. Each draw function takes (g, pal, pose) where
-// pose = { step, attack, pain }. Twelve monsters matching classic Doom.
+// The bestiary. Each creature is a parametric draw function taking
+// (g, pal, pose) with pose = { step, attack, pain }. The style aims for
+// grim rather than cute: flat banded shading instead of balloon
+// gradients, sunken eye sockets with pinpoint glows, ragged asymmetric
+// teeth, old wounds — plus a hash-mottle grit pass in buildSheet that
+// roughs up every surface and darkens silhouette edges.
 
-// Imp — brown hunched humanoid, horn nubs, claws, throws fireballs
-function drawImp(g, pal, pose) {
-  const cx = 32, step = pose.step ? 2 : -2;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark;
-    g.beginPath();
-    g.moveTo(cx + s * 7, 40); g.lineTo(cx + s * (9 + step * s), 52);
-    g.lineTo(cx + s * (8 + step * s * 0.5), 60); g.lineTo(cx + s * 3, 60);
-    g.lineTo(cx + s * 3, 51); g.closePath(); g.fill();
-  }
-  const bg = g.createRadialGradient(cx - 5, 26, 2, cx, 30, 14);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.6, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.ellipse(cx, 30, 13, 12, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(0,0,0,0.7)"; g.lineWidth = 1.4; g.stroke();
-  for (const s of [-1, 1]) {
-    const reach = pose.attack ? s * 6 : 0;
-    g.strokeStyle = pal.body; g.lineWidth = 5; g.lineCap = "round";
-    g.beginPath(); g.moveTo(cx + s * 11, 24); g.lineTo(cx + s * 19 + reach, 34); g.stroke();
-    g.strokeStyle = pal.dark; g.lineWidth = 1.8;
-    for (let i = -1; i <= 1; i++) {
-      g.beginPath(); g.moveTo(cx + s * 19 + reach, 34);
-      g.lineTo(cx + s * 23 + reach * 0.3 + i * s, 30 + i * 3); g.stroke();
-    }
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx, 16, 9, 10, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(0,0,0,0.6)"; g.lineWidth = 1.2; g.stroke();
-  g.fillStyle = "#9a8870";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 5, 9); g.lineTo(cx + s * 9, 4); g.lineTo(cx + s * 7, 11); g.closePath(); g.fill();
-  }
-  g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx, 11, 8.5, 3, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx - 3.5, 14, 1.4, "#ff8820");
-    glowEye(g, cx + 3.5, 14, 1.4, "#ff8820");
-  }
-  g.fillStyle = "#180808"; g.beginPath(); g.ellipse(cx, 22, 5, 3, 0, 0, 7); g.fill();
-  fangRow(g, cx - 4.5, 20, 9, 4, 2.5);
-  if (pose.attack) {
-    const fb = g.createRadialGradient(cx + 25, 32, 0.5, cx + 25, 32, 8);
-    fb.addColorStop(0, "#fff8c0"); fb.addColorStop(0.5, "#ff9020"); fb.addColorStop(1, "rgba(255,60,0,0)");
-    g.fillStyle = fb; g.beginPath(); g.arc(cx + 25, 32, 8, 0, 7); g.fill();
-  }
+// deterministic per-pixel hash: stable across frames so surface grain
+// doesn't shimmer while a monster animates
+function hash2(x, y) {
+  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) ^ 0x5f356495;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-// Cacodemon — bloated red sphere, single top horn, cyclopean eye, fang ring
-function drawCacodemon(g, pal, pose) {
-  const cx = 32, cy = 29, sway = pose.step ? 2 : -2;
-  const bg = g.createRadialGradient(cx - 7 + sway, cy - 8, 2, cx + sway, cy, 22);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.6, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.arc(cx + sway, cy, 22, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,2,2,0.8)"; g.lineWidth = 1.6; g.stroke();
-  g.fillStyle = "#c8c0a0";
-  g.beginPath(); g.moveTo(cx + sway - 3, cy - 19); g.lineTo(cx + sway, cy - 31); g.lineTo(cx + sway + 3, cy - 19); g.closePath(); g.fill();
-  const open = pose.attack ? 11 : 5;
-  g.fillStyle = "#1c0406"; g.beginPath(); g.ellipse(cx + sway, cy + 10, 15, open, 0, 0, 7); g.fill();
-  g.fillStyle = "#4a0a14"; g.beginPath(); g.ellipse(cx + sway, cy + 12, 8, open * 0.5, 0, 0, 7); g.fill();
-  fangRow(g, cx + sway - 13, cy + 10 - open, 26, 7, 4.5);
-  fangRow(g, cx + sway - 12, cy + 9 + open, 24, 6, 4, false);
-  if (pose.attack) {
-    g.fillStyle = "#2050d8"; g.beginPath(); g.ellipse(cx + sway, cy + 14, 4, 7, 0, 0, 7); g.fill();
-  }
-  if (!pose.pain) {
-    g.fillStyle = "#f0ece4"; g.beginPath(); g.arc(cx + sway, cy - 5, 8, 0, 7); g.fill();
-    g.strokeStyle = "rgba(20,10,10,0.7)"; g.lineWidth = 1; g.stroke();
-    for (let i = 0; i < 6; i++) {
-      const a = i * 1.05 + 0.2;
-      g.strokeStyle = "rgba(200,40,20,0.7)"; g.lineWidth = 0.8;
-      g.beginPath(); g.moveTo(cx + sway + Math.cos(a) * 7.5, cy - 5 + Math.sin(a) * 7.5);
-      g.lineTo(cx + sway + Math.cos(a) * 4, cy - 5 + Math.sin(a) * 4); g.stroke();
+// grit pass: mottles every opaque pixel and darkens hard silhouette
+// edges so flesh reads as weathered hide instead of smooth plastic
+function grit(g) {
+  const id = g.getImageData(0, 0, TEXN, TEXN);
+  const d = id.data;
+  const A = (x, y) => (x < 0 || y < 0 || x > 63 || y > 63) ? 0 : d[(y * 64 + x) * 4 + 3];
+  const edge = new Uint8Array(64 * 64);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      if (A(x, y) > 210 && (A(x - 1, y) < 128 || A(x + 1, y) < 128 || A(x, y - 1) < 128 || A(x, y + 1) < 128)) {
+        edge[y * 64 + x] = 1;
+      }
     }
-    const ir = g.createRadialGradient(cx + sway, cy - 4.5, 0.5, cx + sway, cy - 4.5, 5);
-    ir.addColorStop(0, "#80e0ff"); ir.addColorStop(1, "#1c3ab0");
-    g.fillStyle = ir; g.beginPath(); g.arc(cx + sway, cy - 4.5, 5, 0, 7); g.fill();
-    g.fillStyle = "#080812"; g.beginPath(); g.arc(cx + sway + 0.5, cy - 4, 2.4, 0, 7); g.fill();
-    g.fillStyle = "rgba(255,255,255,0.9)"; g.beginPath(); g.arc(cx + sway - 1.2, cy - 6, 1, 0, 7); g.fill();
-  } else {
-    g.strokeStyle = "#180808"; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(cx + sway - 6, cy - 8); g.lineTo(cx + sway + 2, cy - 1);
-    g.moveTo(cx + sway + 2, cy - 8); g.lineTo(cx + sway - 6, cy - 1); g.stroke();
   }
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      const i = (y * 64 + x) * 4;
+      if (d[i + 3] < 16) continue;
+      const h = hash2(x, y);
+      let m = 1;
+      if (h < 0.14) m = 0.8;
+      else if (h < 0.28) m = 0.9;
+      else if (h > 0.94) m = 1.13;
+      if (edge[y * 64 + x]) m *= 0.52;
+      d[i] *= m;
+      d[i + 1] *= m;
+      d[i + 2] *= m;
+    }
+  }
+  g.putImageData(id, 0, 0);
 }
 
-// Cyberdemon — massive armored hellbeast, rocket launcher arm, goat hooves
-function drawCyberdemon(g, pal, pose) {
-  const cx = 32, lean = pose.step ? 1.5 : -1.5;
-  const rage = pose.attack ? 1 : 0;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 10 + lean, 47, 7, 9, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx + s * 9 + lean, 45, 5.5, 7, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.dark;
-    g.beginPath(); g.moveTo(cx + s * 9 + lean, 54); g.lineTo(cx + s * (12 + lean * 0.5), 61);
-    g.lineTo(cx + s * 9 + lean * 0.5, 64); g.lineTo(cx + s * 5 + lean * 0.5, 64); g.closePath(); g.fill();
-    g.fillStyle = "#4a5060"; g.fillRect(cx + s * 4 + lean * 0.5, 61, 9, 3);
-    g.fillStyle = "#6a7484"; g.fillRect(cx + s * 5 + lean * 0.5, 61, 7, 1);
-  }
-  const tg = g.createRadialGradient(cx - 8 + lean, 22, 2, cx + lean, 32, 24);
-  tg.addColorStop(0, pal.lite); tg.addColorStop(0.5, pal.body); tg.addColorStop(1, pal.dark);
-  g.fillStyle = tg; g.beginPath(); g.ellipse(cx + lean, 32, 20, 16, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.8)"; g.lineWidth = 1.8; g.stroke();
-  g.fillStyle = "#38404a";
-  g.beginPath(); g.moveTo(cx + lean - 11, 20); g.lineTo(cx + lean + 11, 20);
-  g.lineTo(cx + lean + 9, 38); g.lineTo(cx + lean - 9, 38); g.closePath(); g.fill();
-  g.fillStyle = "#58606a"; g.fillRect(cx + lean - 9, 21, 18, 2);
-  g.fillStyle = "#8a3020"; g.beginPath(); g.arc(cx + lean, 29, 4, 0, 7); g.fill();
-  g.fillStyle = "#c04030"; g.beginPath(); g.arc(cx + lean, 29, 2.5, 0, 7); g.fill();
-  g.strokeStyle = pal.dark; g.lineWidth = 7; g.lineCap = "round";
-  g.beginPath(); g.moveTo(cx - 16 + lean, 26); g.lineTo(cx - 20 + lean, 36); g.stroke();
-  g.fillStyle = pal.dark; g.beginPath(); g.arc(cx - 20 + lean, 37, 5, 0, 7); g.fill();
-  g.fillStyle = "#2a3038"; g.beginPath(); g.ellipse(cx + 18 + lean, 26, 7, 5, 0.2, 0, 7); g.fill();
-  g.fillStyle = "#404858"; g.fillRect(cx + 13 + lean, 24, 16, 5);
-  g.fillStyle = "#1a1e26"; g.fillRect(cx + 26 + lean, 23, 6, 7);
-  g.fillStyle = "#08090e"; g.beginPath(); g.arc(cx + 29 + lean, 26.5, 2.5, 0, 7); g.fill();
-  if (rage) {
-    const mf = g.createRadialGradient(cx + 33 + lean, 26.5, 0.5, cx + 33 + lean, 26.5, 7);
-    mf.addColorStop(0, "#fff8c0"); mf.addColorStop(0.6, "#ff8020"); mf.addColorStop(1, "rgba(255,60,0,0)");
-    g.fillStyle = mf; g.beginPath(); g.arc(cx + 33 + lean, 26.5, 7, 0, 7); g.fill();
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.arc(cx + lean, 14, 9, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.7)"; g.lineWidth = 1.4; g.stroke();
-  g.fillStyle = "#38404a"; g.beginPath(); g.ellipse(cx + lean, 15, 7, 7.5, 0, 0, 7); g.fill();
-  g.fillStyle = "#262a32";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 6 + lean, 8); g.lineTo(cx + s * 10 + lean, 2);
-    g.lineTo(cx + s * 8 + lean, 11); g.closePath(); g.fill();
-    g.fillStyle = "#424856"; g.beginPath(); g.arc(cx + s * 10 + lean, 2.5, 1.2, 0, 7); g.fill();
-    g.fillStyle = "#262a32";
-  }
-  if (!pose.pain) {
-    glowEye(g, cx - 3.5 + lean, 14, 1.5, "#ff4020");
-    glowEye(g, cx + 3.5 + lean, 14, 1.5, "#ff4020");
-  }
-}
-
-// Lost Soul — flaming skull that hurtles at the player
-function drawLostSoul(g, pal, pose) {
-  const cx = 32, cy = 28, sway = pose.step ? 2.5 : -2.5;
-  for (const [fx, fy, fr] of [
-    [cx + sway - 4, cy - 15, 6.5], [cx + sway + 5, cy - 13, 5.5],
-    [cx + sway, cy - 16, 7.5], [cx + sway - 9, cy + 1, 5.5],
-    [cx + sway + 9, cy + 1, 5.5], [cx + sway, cy + 15, 7],
-  ]) {
-    const fl = g.createRadialGradient(fx, fy, 0.5, fx, fy, fr * 1.7);
-    fl.addColorStop(0, "#fff8a0"); fl.addColorStop(0.4, "#ff8020"); fl.addColorStop(1, "rgba(200,50,0,0)");
-    g.fillStyle = fl; g.beginPath(); g.ellipse(fx, fy, fr * 0.65, fr, 0, 0, 7); g.fill();
-  }
-  g.fillStyle = pal.lite; g.beginPath(); g.arc(cx + sway, cy, 14, 0, 7); g.fill();
-  g.strokeStyle = pal.dark; g.lineWidth = 1.4; g.stroke();
-  g.fillStyle = pal.body;
-  g.beginPath(); g.ellipse(cx + sway - 7, cy + 4, 4, 3, -0.3, 0, 7); g.fill();
-  g.beginPath(); g.ellipse(cx + sway + 7, cy + 4, 4, 3, 0.3, 0, 7); g.fill();
-  g.fillStyle = "#0a0c14";
-  g.beginPath(); g.ellipse(cx + sway - 4.5, cy - 1, 3, 4, 0, 0, 7); g.fill();
-  g.beginPath(); g.ellipse(cx + sway + 4.5, cy - 1, 3, 4, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx + sway - 4.5, cy - 1, 1.4, "#60a8ff");
-    glowEye(g, cx + sway + 4.5, cy - 1, 1.4, "#60a8ff");
-  }
-  g.fillStyle = "#0a0c14";
-  g.beginPath(); g.moveTo(cx + sway - 2, cy + 5); g.lineTo(cx + sway, cy + 9); g.lineTo(cx + sway + 2, cy + 5); g.closePath(); g.fill();
-  fangRow(g, cx + sway - 7, cy + 11, 14, 5, 3);
-  if (pose.attack) {
-    const ag = g.createRadialGradient(cx + sway, cy, 6, cx + sway, cy, 22);
-    ag.addColorStop(0, "rgba(255,200,50,0.35)"); ag.addColorStop(1, "rgba(255,80,0,0)");
-    g.fillStyle = ag; g.beginPath(); g.arc(cx + sway, cy, 22, 0, 7); g.fill();
-  }
-}
-
-// Arachnotron — cybernetic green brain on metal spider legs, plasma cannon
-function drawArachnotron(g, pal, pose) {
-  const cx = 32, cy = 43;
-  for (let i = 0; i < 4; i++) {
-    for (const s of [-1, 1]) {
-      const ph = (i + (pose.step ? 1 : 0)) % 2 ? 3 : -2;
-      g.strokeStyle = "#283228"; g.lineWidth = 2.4; g.lineCap = "round";
-      g.beginPath(); g.moveTo(cx + s * 7, cy);
-      g.lineTo(cx + s * (12 + i * 3.2), cy - 5 + ph);
-      g.lineTo(cx + s * (16 + i * 3.8), 62); g.stroke();
-      g.fillStyle = "#485a4a"; g.beginPath(); g.arc(cx + s * (12 + i * 3.2), cy - 5 + ph, 1.8, 0, 7); g.fill();
-    }
-  }
-  g.fillStyle = "#283226"; g.beginPath(); g.ellipse(cx, cy, 13, 7, 0, 0, 7); g.fill();
-  g.strokeStyle = "#485a48"; g.lineWidth = 1.4; g.stroke();
-  const cg = g.createLinearGradient(cx - 4, 18, cx + 4, 28);
-  cg.addColorStop(0, "#58624e"); cg.addColorStop(1, "#283026");
-  g.fillStyle = cg; g.beginPath(); g.ellipse(cx, cy - 14, 4, 7.5, 0, 0, 7); g.fill();
-  g.fillStyle = "#181c18"; g.beginPath(); g.ellipse(cx, cy - 21, 3.2, 2.2, 0, 0, 7); g.fill();
-  if (pose.attack) {
-    const pf = g.createRadialGradient(cx, cy - 27, 0.5, cx, cy - 27, 7);
-    pf.addColorStop(0, "#c8ffc0"); pf.addColorStop(0.5, "#30d830"); pf.addColorStop(1, "rgba(0,160,0,0)");
-    g.fillStyle = pf; g.beginPath(); g.arc(cx, cy - 27, 7, 0, 7); g.fill();
-  }
-  const dg = g.createRadialGradient(cx - 5, cy - 13, 1, cx, cy - 9, 11);
-  dg.addColorStop(0, "rgba(170,210,170,0.65)"); dg.addColorStop(0.7, "rgba(90,150,90,0.35)"); dg.addColorStop(1, "rgba(30,70,30,0.1)");
-  g.fillStyle = dg; g.beginPath(); g.arc(cx, cy - 9, 11, Math.PI, 0); g.fill();
-  g.strokeStyle = "#386040"; g.lineWidth = 1.2; g.stroke();
-  const brn = g.createRadialGradient(cx - 3, cy - 11, 1, cx, cy - 9, 8);
-  brn.addColorStop(0, "#78e858"); brn.addColorStop(0.6, "#38b028"); brn.addColorStop(1, "#184a16");
-  g.fillStyle = brn; g.beginPath(); g.arc(cx, cy - 9, 8, Math.PI, 0); g.fill();
-  g.strokeStyle = "#259818"; g.lineWidth = 1;
-  for (let i = -3; i <= 3; i++) {
-    g.beginPath(); g.moveTo(cx + i * 2.2, cy - 17); g.quadraticCurveTo(cx + i * 2.2 - 1, cy - 12, cx + i * 2.2, cy - 9); g.stroke();
-  }
-  if (!pose.pain) {
-    glowEye(g, cx - 3, cy - 8, 1.2, "#80ffa0");
-    glowEye(g, cx + 3, cy - 8, 1.2, "#80ffa0");
-  }
-}
-
-// Baron of Hell — tall goat-legged humanoid, green plasma throws
-function drawBaron(g, pal, pose) {
-  const cx = 32, lean = pose.step ? 1.5 : -1.5;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 10, 45, 6.5, 9.5, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx + s * 9, 43, 5, 7.5, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.dark;
-    g.beginPath(); g.moveTo(cx + s * 9, 53); g.lineTo(cx + s * (11 + lean * s), 60);
-    g.lineTo(cx + s * 8, 64); g.lineTo(cx + s * 4, 64); g.closePath(); g.fill();
-    g.fillStyle = "#1c2828"; g.fillRect(cx + s * 3, 61, 9, 3);
-    g.fillStyle = "#2c3e3e"; g.fillRect(cx + s * 4, 61, 7, 1);
-  }
-  const bg = g.createRadialGradient(cx - 8 + lean, 22, 2, cx + lean, 30, 21);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.5, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.ellipse(cx + lean, 28, 17, 15, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,5,10,0.8)"; g.lineWidth = 1.6; g.stroke();
-  for (const s of [-1, 1]) {
-    g.strokeStyle = pal.dark; g.lineWidth = 1.2;
-    g.beginPath(); g.arc(cx + s * 8 + lean, 26, 5, 0.2, Math.PI - 0.2); g.stroke();
-  }
-  for (const s of [-1, 1]) {
-    const rz = pose.attack ? -10 : 0;
-    g.strokeStyle = pal.dark; g.lineWidth = 8; g.lineCap = "round";
-    g.beginPath(); g.moveTo(cx + s * 15 + lean, 22); g.lineTo(cx + s * 23 + lean, 35 + rz); g.stroke();
-    g.strokeStyle = pal.body; g.lineWidth = 5;
-    g.beginPath(); g.moveTo(cx + s * 14 + lean, 21); g.lineTo(cx + s * 22 + lean, 34 + rz); g.stroke();
-    g.fillStyle = pal.dark; g.beginPath(); g.arc(cx + s * 23 + lean, 36 + rz, 5, 0, 7); g.fill();
-    if (pose.attack) {
-      const pg = g.createRadialGradient(cx + s * 23 + lean, 36 + rz, 1, cx + s * 23 + lean, 36 + rz, 9);
-      pg.addColorStop(0, "#c0ffb0"); pg.addColorStop(0.5, "#38d030"); pg.addColorStop(1, "rgba(0,160,0,0)");
-      g.fillStyle = pg; g.beginPath(); g.arc(cx + s * 23 + lean, 36 + rz, 9, 0, 7); g.fill();
-    }
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.arc(cx + lean, 12, 10, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,5,10,0.7)"; g.lineWidth = 1.4; g.stroke();
-  g.strokeStyle = "#d8d0b8"; g.lineWidth = 3.5; g.lineCap = "round";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 7 + lean, 5); g.quadraticCurveTo(cx + s * 15 + lean, 2, cx + s * 15 + lean, 9); g.stroke();
-  }
-  g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + lean, 7, 9, 3.5, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx - 4 + lean, 10, 1.5, "#f0f050");
-    glowEye(g, cx + 4 + lean, 10, 1.5, "#f0f050");
-  }
-  fangRow(g, cx + lean - 5, 16, 10, 4, 3);
-}
-
-// Pain Elemental — floating horned head, giant maw, spawns Lost Souls
-function drawPainElemental(g, pal, pose) {
-  const cx = 32, cy = 27, sway = pose.step ? 2.5 : -2.5;
-  g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + sway * 0.4, 50, 7, 5, 0, 0, 7); g.fill();
-  for (const s of [-1, 1]) {
-    g.strokeStyle = pal.dark; g.lineWidth = 3.5; g.lineCap = "round";
-    g.beginPath(); g.moveTo(cx + s * 12 + sway, cy + 8); g.lineTo(cx + s * 17 + sway, cy + 17); g.stroke();
-    g.fillStyle = pal.dark; g.beginPath(); g.arc(cx + s * 17 + sway, cy + 17, 3, 0, 7); g.fill();
-  }
-  const hg = g.createRadialGradient(cx - 7 + sway, cy - 6, 2, cx + sway, cy, 17);
-  hg.addColorStop(0, pal.lite); hg.addColorStop(0.6, pal.body); hg.addColorStop(1, pal.dark);
-  g.fillStyle = hg; g.beginPath(); g.arc(cx + sway, cy, 17, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,3,3,0.8)"; g.lineWidth = 1.6; g.stroke();
-  g.fillStyle = "#8a8060";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 10 + sway, cy - 12); g.lineTo(cx + s * 14 + sway, cy - 18);
-    g.lineTo(cx + s * 9 + sway, cy - 10); g.closePath(); g.fill();
-  }
-  const open = pose.attack ? 10 : 5;
-  g.fillStyle = "#1c0408"; g.beginPath(); g.ellipse(cx + sway, cy + 7, 12, open, 0, 0, 7); g.fill();
-  g.fillStyle = "#4a0a14"; g.beginPath(); g.ellipse(cx + sway, cy + 9, 6.5, open * 0.5, 0, 0, 7); g.fill();
-  fangRow(g, cx + sway - 10, cy + 7 - open, 20, 6, 4);
-  fangRow(g, cx + sway - 9, cy + 6 + open, 18, 5, 3.5, false);
-  if (pose.attack) {
-    g.fillStyle = "#dfd6bc"; g.beginPath(); g.arc(cx + sway + 19, cy + 8, 5, 0, 7); g.fill();
-    glowEye(g, cx + sway + 17, cy + 7, 0.8, "#5090ff");
-    glowEye(g, cx + sway + 21, cy + 7, 0.8, "#5090ff");
-  }
-  if (!pose.pain) {
-    glowEye(g, cx - 6 + sway, cy - 4, 1.5, "#ff3820");
-    glowEye(g, cx + 6 + sway, cy - 4, 1.5, "#ff3820");
-  }
-}
-
-// Revenant — walking skeleton with shoulder-mounted missile pods
-function drawRevenant(g, pal, pose) {
-  const cx = 32, step = pose.step ? 2 : -2;
-  g.strokeStyle = pal.body; g.lineWidth = 3; g.lineCap = "round";
-  g.beginPath();
-  g.moveTo(cx - 4, 42); g.lineTo(cx - 6 - step, 53); g.lineTo(cx - 8 - step * 0.5, 62);
-  g.moveTo(cx + 4, 42); g.lineTo(cx + 6 + step, 53); g.lineTo(cx + 8 + step * 0.5, 62);
-  g.stroke();
-  g.lineWidth = 2.5;
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * (8 + step * 0.5), 62); g.lineTo(cx + s * (12 + step * 0.5), 62); g.stroke();
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx, 42, 8, 5, 0, 0, 7); g.fill();
-  g.strokeStyle = pal.dark; g.lineWidth = 1; g.stroke();
-  const rb = g.createLinearGradient(0, 18, 0, 42);
-  rb.addColorStop(0, pal.lite); rb.addColorStop(1, pal.dark);
-  g.fillStyle = rb;
-  g.beginPath(); g.moveTo(cx - 9, 20); g.lineTo(cx + 9, 20); g.lineTo(cx + 7, 42); g.lineTo(cx - 7, 42); g.closePath(); g.fill();
-  g.strokeStyle = pal.dark; g.lineWidth = 1.5;
-  for (let i = 0; i < 4; i++) {
-    g.beginPath(); g.moveTo(cx - 7.5 + i * 0.5, 24 + i * 4.5); g.lineTo(cx + 7.5 - i * 0.5, 24 + i * 4.5); g.stroke();
-  }
-  g.strokeStyle = pal.body; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, 20); g.lineTo(cx, 40); g.stroke();
-  for (const s of [-1, 1]) {
-    const podY = pose.attack ? 14 : 22;
-    g.fillStyle = "#3a4048"; g.beginPath(); g.ellipse(cx + s * 16, podY, 6, 7.5, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = "#5a6270"; g.fillRect(cx + s * 16 - 3.5, podY - 7.5, 7, 3);
-    for (let i = 0; i < 2; i++) {
-      g.fillStyle = "#1a1e26"; g.beginPath(); g.arc(cx + s * 16 + i * s * 2, podY - 6, 1.4, 0, 7); g.fill();
-    }
-    if (pose.attack) {
-      const mf = g.createRadialGradient(cx + s * 16, podY - 11, 0.5, cx + s * 16, podY - 11, 8);
-      mf.addColorStop(0, "#fff8c0"); mf.addColorStop(0.5, "#ff8020"); mf.addColorStop(1, "rgba(255,40,0,0)");
-      g.fillStyle = mf; g.beginPath(); g.arc(cx + s * 16, podY - 11, 8, 0, 7); g.fill();
-    }
-  }
-  g.strokeStyle = pal.body; g.lineWidth = 2.8;
-  for (const s of [-1, 1]) {
-    const rz = pose.attack ? -5 : 0;
-    g.beginPath(); g.moveTo(cx + s * 9, 22); g.lineTo(cx + s * 17, 33 + rz); g.lineTo(cx + s * 16, 40 + rz); g.stroke();
-    for (let i = -1; i <= 1; i++) {
-      g.beginPath(); g.moveTo(cx + s * 16, 40 + rz); g.lineTo(cx + s * (18 + i * s), 44 + rz); g.stroke();
-    }
-  }
-  g.fillStyle = pal.lite; g.beginPath(); g.arc(cx, 12, 7.5, 0, 7); g.fill();
-  g.fillRect(cx - 5, 15, 10, 6);
-  g.strokeStyle = pal.dark; g.lineWidth = 1.2; g.stroke();
-  g.fillStyle = "#0e0e18";
-  g.beginPath(); g.ellipse(cx - 3, 11, 2.4, 3, 0, 0, 7); g.fill();
-  g.beginPath(); g.ellipse(cx + 3, 11, 2.4, 3, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx - 3, 11, 1.1, "#ff3820");
-    glowEye(g, cx + 3, 11, 1.1, "#ff3820");
-  }
-  fangRow(g, cx - 4, 19, 8, 4, 2);
-}
-
-// Pinky Demon — pink charging quadruped, enormous head and gaping jaw
-function drawPinky(g, pal, pose) {
-  const cx = 32, step = pose.step ? 3 : -3;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 9, 50, 6, 8, s * 0.3, 0, 7); g.fill();
-    g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx + s * 8, 48, 4.5, 6, s * 0.3, 0, 7); g.fill();
-    g.fillStyle = pal.dark; g.fillRect(cx + s * 5, 55, 7, 5);
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 11 + step * s * 0.4, 40, 5, 7.5, s * 0.15, 0, 7); g.fill();
-    g.fillRect(cx + s * (8 + step * s * 0.4), 45, 6, 5);
-  }
-  const bg = g.createRadialGradient(cx - 5, 35, 3, cx, 39, 16);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.6, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.ellipse(cx, 39, 15, 10, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,3,3,0.8)"; g.lineWidth = 1.4; g.stroke();
-  const headY = pose.attack ? 28 : 30;
-  const hg = g.createRadialGradient(cx - 6, headY - 6, 2, cx, headY, 15);
-  hg.addColorStop(0, pal.lite); hg.addColorStop(0.6, pal.body); hg.addColorStop(1, pal.dark);
-  g.fillStyle = hg; g.beginPath(); g.arc(cx, headY, 14, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,3,3,0.8)"; g.lineWidth = 1.4; g.stroke();
-  g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx, headY + 10, 9, 6.5, 0, 0, 7); g.fill();
-  const open = pose.attack ? 10 : 5;
-  g.fillStyle = "#1c0408"; g.beginPath(); g.ellipse(cx, headY + 11, 9, open, 0, 0, 7); g.fill();
-  g.fillStyle = "#4a0814"; g.beginPath(); g.ellipse(cx, headY + 13, 5, open * 0.5, 0, 0, 7); g.fill();
-  fangRow(g, cx - 8, headY + 11 - open, 16, 5, 4);
-  fangRow(g, cx - 7, headY + 10 + open, 14, 4, 3.5, false);
-  if (!pose.pain) {
-    glowEye(g, cx - 5, headY - 5, 1.3, "#ff9030");
-    glowEye(g, cx + 5, headY - 5, 1.3, "#ff9030");
-  }
-}
-
-// Archvile — gaunt undead sorcerer, blue resurrection fire, raised arms
-function drawArchvile(g, pal, pose) {
-  const cx = 32, step = pose.step ? 1.5 : -1.5;
-  if (pose.attack) {
-    for (const [fx, fy] of [[cx - 8, 16], [cx + 8, 14], [cx - 2, 7], [cx + 4, 9]]) {
-      const fl = g.createRadialGradient(fx, fy, 0.5, fx, fy, 9);
-      fl.addColorStop(0, "#ffffff"); fl.addColorStop(0.4, "#80c8ff"); fl.addColorStop(1, "rgba(40,80,255,0)");
-      g.fillStyle = fl; g.beginPath(); g.ellipse(fx, fy, 5, 9, 0, 0, 7); g.fill();
-    }
-  }
-  g.fillStyle = pal.dark;
-  g.fillRect(cx - 7 + step, 44, 5, 16); g.fillRect(cx + 2 - step, 44, 5, 16);
-  g.fillRect(cx - 10 + step, 58, 8, 3); g.fillRect(cx - 1 - step, 58, 8, 3);
-  const bg = g.createLinearGradient(0, 12, 0, 46);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg;
-  g.beginPath(); g.moveTo(cx - 8, 14); g.lineTo(cx + 8, 14); g.lineTo(cx + 6, 46); g.lineTo(cx - 6, 46); g.closePath(); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.8)"; g.lineWidth = 1.2; g.stroke();
-  g.strokeStyle = pal.dark; g.lineWidth = 1.3;
-  for (let i = 0; i < 4; i++) {
-    g.beginPath(); g.moveTo(cx - 6.5 + i * 0.5, 20 + i * 5); g.lineTo(cx + 6.5 - i * 0.5, 20 + i * 5); g.stroke();
-  }
-  g.strokeStyle = pal.body; g.lineWidth = 3.5; g.lineCap = "round";
-  if (pose.attack) {
-    for (const s of [-1, 1]) {
-      g.beginPath(); g.moveTo(cx + s * 7, 17); g.lineTo(cx + s * 17, 7); g.lineTo(cx + s * 19, 1); g.stroke();
-    }
-  } else {
-    for (const s of [-1, 1]) {
-      g.beginPath(); g.moveTo(cx + s * 7, 19); g.lineTo(cx + s * 15, 31); g.lineTo(cx + s * 14, 40); g.stroke();
-    }
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx, 9, 7, 8, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.6)"; g.lineWidth = 1.2; g.stroke();
-  g.fillStyle = pal.lite; g.beginPath(); g.ellipse(cx, 9, 5.5, 6.5, 0, 0, 7); g.fill();
-  g.fillStyle = "#0a0a14";
-  g.beginPath(); g.ellipse(cx - 2.8, 7, 2, 2.8, 0, 0, 7); g.fill();
-  g.beginPath(); g.ellipse(cx + 2.8, 7, 2, 2.8, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx - 2.8, 7, 0.9, pose.attack ? "#ffffff" : "#80c8ff");
-    glowEye(g, cx + 2.8, 7, 0.9, pose.attack ? "#ffffff" : "#80c8ff");
-  }
-  g.fillStyle = "#0a0608"; g.beginPath(); g.ellipse(cx, 14, 3.5, 4.5, 0, 0, 7); g.fill();
-}
-
-// Hell Knight — scarred dark Baron variant, hurls brown plasma
-function drawHellKnight(g, pal, pose) {
-  const cx = 32, lean = pose.step ? 1.5 : -1.5;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 10, 45, 6.5, 9.5, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx + s * 9, 43, 5, 7.5, s * 0.2, 0, 7); g.fill();
-    g.fillStyle = pal.dark;
-    g.beginPath(); g.moveTo(cx + s * 9, 52); g.lineTo(cx + s * (12 + lean * s), 60);
-    g.lineTo(cx + s * 9, 64); g.lineTo(cx + s * 5, 64); g.closePath(); g.fill();
-    g.fillStyle = "#2e2420"; g.fillRect(cx + s * 4, 61, 7, 3);
-  }
-  const bg = g.createRadialGradient(cx - 7 + lean, 22, 2, cx + lean, 30, 18);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.5, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.ellipse(cx + lean, 28, 16, 15, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.8)"; g.lineWidth = 1.6; g.stroke();
-  g.strokeStyle = "#7a1818"; g.lineWidth = 1.4;
-  for (let i = 0; i < 3; i++) {
-    g.beginPath(); g.moveTo(cx - 5 + lean, 22 + i * 5); g.lineTo(cx + 5 + lean, 24 + i * 5); g.stroke();
-  }
-  for (const s of [-1, 1]) {
-    const rz = pose.attack ? -9 : 0;
-    g.strokeStyle = pal.dark; g.lineWidth = 7; g.lineCap = "round";
-    g.beginPath(); g.moveTo(cx + s * 15 + lean, 22); g.lineTo(cx + s * 21 + lean, 35 + rz); g.stroke();
-    g.strokeStyle = pal.body; g.lineWidth = 4;
-    g.beginPath(); g.moveTo(cx + s * 14 + lean, 21); g.lineTo(cx + s * 20 + lean, 34 + rz); g.stroke();
-    g.fillStyle = pal.dark; g.beginPath(); g.arc(cx + s * 21 + lean, 36 + rz, 5, 0, 7); g.fill();
-    if (pose.attack) {
-      const pg = g.createRadialGradient(cx + s * 21 + lean, 36 + rz, 1, cx + s * 21 + lean, 36 + rz, 9);
-      pg.addColorStop(0, "#e0a060"); pg.addColorStop(0.5, "#a06020"); pg.addColorStop(1, "rgba(100,50,0,0)");
-      g.fillStyle = pg; g.beginPath(); g.arc(cx + s * 21 + lean, 36 + rz, 9, 0, 7); g.fill();
-    }
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.arc(cx + lean, 12, 9.5, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.7)"; g.lineWidth = 1.4; g.stroke();
-  g.fillStyle = "#2e2820";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 6 + lean, 5); g.lineTo(cx + s * 10 + lean, 1);
-    g.lineTo(cx + s * 8 + lean, 8); g.closePath(); g.fill();
-  }
-  g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + lean, 7.5, 8.5, 3, 0, 0, 7); g.fill();
-  if (!pose.pain) {
-    glowEye(g, cx - 4 + lean, 10, 1.4, "#f0a020");
-    glowEye(g, cx + 4 + lean, 10, 1.4, "#f0a020");
-  }
-  fangRow(g, cx + lean - 5, 16, 10, 4, 3);
-}
-
-// Mancubus — rotund flesh-tank with arm-mounted flame cannons
-function drawMancubus(g, pal, pose) {
-  const cx = 32, lean = pose.step ? 1 : -1;
-  for (const s of [-1, 1]) {
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 11 + lean, 52, 8, 8.5, 0, 0, 7); g.fill();
-    g.fillStyle = pal.body; g.beginPath(); g.ellipse(cx + s * 10 + lean, 50, 6, 6.5, 0, 0, 7); g.fill();
-    g.fillStyle = "#3a3830"; g.fillRect(cx + s * 5 + lean - 1, 59, 10, 3);
-  }
-  const bg = g.createRadialGradient(cx - 10 + lean, 24, 3, cx + lean, 36, 23);
-  bg.addColorStop(0, pal.lite); bg.addColorStop(0.55, pal.body); bg.addColorStop(1, pal.dark);
-  g.fillStyle = bg; g.beginPath(); g.ellipse(cx + lean, 36, 20, 17, 0, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.8)"; g.lineWidth = 1.8; g.stroke();
-  g.strokeStyle = pal.dark; g.lineWidth = 1.3;
-  for (let i = 0; i < 2; i++) {
-    g.beginPath(); g.arc(cx + lean, 40 + i * 7, 14 - i * 2, 0.15, Math.PI - 0.15); g.stroke();
-  }
-  for (const s of [-1, 1]) {
-    const rz = pose.attack ? -4 : 0;
-    g.fillStyle = pal.dark; g.beginPath(); g.ellipse(cx + s * 19 + lean, 28 + rz, 6, 4.5, s * 0.3, 0, 7); g.fill();
-    g.fillStyle = "#28303a"; g.beginPath(); g.ellipse(cx + s * 25 + lean, 26 + rz, 7.5, 5, 0, 0, 7); g.fill();
-    g.fillStyle = "#181e28"; g.beginPath(); g.ellipse(cx + s * 30 + lean, 26 + rz, 4.5, 3.8, 0, 0, 7); g.fill();
-    for (let i = -1; i <= 0; i++) {
-      g.fillStyle = "#090c14"; g.beginPath(); g.arc(cx + s * (31 + lean) + i * 3, 26 + rz + i, 1.5, 0, 7); g.fill();
-    }
-    if (pose.attack) {
-      const fb = g.createRadialGradient(cx + s * 36 + lean, 25 + rz, 0.5, cx + s * 36 + lean, 25 + rz, 10);
-      fb.addColorStop(0, "#ffffff"); fb.addColorStop(0.3, "#fff4a0");
-      fb.addColorStop(0.6, "#ff8020"); fb.addColorStop(1, "rgba(200,40,0,0)");
-      g.fillStyle = fb; g.beginPath(); g.arc(cx + s * 36 + lean, 25 + rz, 10, 0, 7); g.fill();
-    }
-  }
-  g.fillStyle = pal.body; g.beginPath(); g.arc(cx + lean, 16, 8, 0, 7); g.fill();
-  g.strokeStyle = "rgba(5,4,4,0.7)"; g.lineWidth = 1.3; g.stroke();
-  g.fillStyle = "#2e2820";
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.moveTo(cx + s * 5 + lean, 10); g.lineTo(cx + s * 8 + lean, 6);
-    g.lineTo(cx + s * 6 + lean, 12); g.closePath(); g.fill();
-  }
-  if (!pose.pain) {
-    glowEye(g, cx - 3 + lean, 15, 1.3, "#e04020");
-    glowEye(g, cx + 3 + lean, 15, 1.3, "#e04020");
-  }
-  g.fillStyle = "#1c0808"; g.beginPath(); g.ellipse(cx + lean, 20, 4.5, 2.8, 0, 0, 7); g.fill();
-  fangRow(g, cx + lean - 4, 18.5, 8, 3, 2.5);
-}
-
-
-
-// ----------------------------------------------------- the scary bestiary
-// Shared helpers: glowing eyes, fang rows, a generic collapse-into-puddle
-// death, and a sheet builder that derives pain/flash/death frames from a
-// single parametric draw function per creature.
-
+// hot pinpoint pupil
 function glowEye(g, x, y, r, color) {
   const gr = g.createRadialGradient(x, y, 0.2, x, y, r * 2.6);
   gr.addColorStop(0, "#ffffff");
@@ -930,71 +453,1322 @@ function glowEye(g, x, y, r, color) {
   g.fill();
 }
 
-function fangRow(g, x, y, w, n, h, down = true, color = "#ded5c2") {
-  g.fillStyle = color;
+// pair of eyes sunk in black sockets under a heavy angry brow
+function socketEyes(g, cx, y, dx, color, r = 1.2, tilt = 0.3) {
+  for (const s of [-1, 1]) {
+    const x = cx + s * dx;
+    g.fillStyle = "#070308";
+    g.beginPath();
+    g.ellipse(x, y, r + 1.9, r + 1.4, s * tilt, 0, 7);
+    g.fill();
+    glowEye(g, x + s * 0.4, y + 0.3, r, color);
+    g.strokeStyle = "#070308";
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(x + s * 3.2, y - 2.9);
+    g.lineTo(x - s * 2.2, y - 1.2);
+    g.stroke();
+  }
+}
+
+// ragged uneven teeth: every fang gets its own height, lean and stain
+function teeth(g, x, y, w, n, h, down = true) {
   const step = w / n;
   for (let i = 0; i < n; i++) {
     const fx = x + i * step;
+    const hh = h * (0.55 + hash2(i * 17 + (x | 0), (y * 3) | 0) * 0.8);
+    const lean = (hash2(i * 29, (x + y) | 0) - 0.5) * step * 0.9;
+    g.fillStyle = hash2(i * 11, (y | 0) + i) < 0.3 ? "#b3a583" : "#e2d9c2";
     g.beginPath();
     g.moveTo(fx, y);
     g.lineTo(fx + step, y);
-    g.lineTo(fx + step / 2, y + (down ? h : -h));
+    g.lineTo(fx + step / 2 + lean, y + (down ? hh : -hh));
     g.closePath();
     g.fill();
   }
 }
 
-function drawPuddle(g, pal, s) {
-  const cx = 32, bottom = 60;
-  if (s < 0.5) {
-    const h = 26 * (1 - s);
-    const bg = g.createRadialGradient(cx - 5, bottom - h, 2, cx, bottom - h / 2, 20);
-    bg.addColorStop(0, pal.lite);
-    bg.addColorStop(1, pal.dark);
-    g.fillStyle = bg;
+// strands of saliva hanging off a jaw
+function drool(g, cx, y, w) {
+  for (let i = 0; i < 3; i++) {
+    const x = cx - w * 0.5 + hash2(i * 7, w | 0) * w;
+    const len = 2.5 + hash2(i * 13, y | 0) * 5;
+    g.strokeStyle = "rgba(196,206,178,0.8)";
+    g.lineWidth = 0.9;
     g.beginPath();
-    g.ellipse(cx, bottom - h / 2, 17, h / 2, 0, 0, 7);
-    g.fill();
-    g.strokeStyle = "rgba(8,8,10,0.7)";
-    g.lineWidth = 1.5;
+    g.moveTo(x, y - 1);
+    g.lineTo(x + 0.5, y + len);
     g.stroke();
-    g.strokeStyle = "#0c0c0c";
-    g.lineWidth = 2;
+    g.fillStyle = "rgba(208,216,188,0.85)";
+    g.fillRect(x, y + len, 1.2, 1.2);
+  }
+}
+
+// gaping mouth: black gullet, wet red throat, two rows of ragged fangs
+function gapingMaw(g, cx, cy, rx, open, drooling) {
+  g.fillStyle = "#0c0203";
+  g.beginPath();
+  g.ellipse(cx, cy, rx, open, 0, 0, 7);
+  g.fill();
+  g.fillStyle = "#560a10";
+  g.beginPath();
+  g.ellipse(cx, cy + open * 0.3, rx * 0.6, open * 0.55, 0, 0, 7);
+  g.fill();
+  g.fillStyle = "#8e1418";
+  g.beginPath();
+  g.ellipse(cx - rx * 0.15, cy + open * 0.4, rx * 0.32, open * 0.3, 0, 0, 7);
+  g.fill();
+  teeth(g, cx - rx + 0.5, cy - open + 1, rx * 2 - 1, Math.max(4, (rx * 0.6) | 0), Math.min(open * 0.85, rx * 0.9), true);
+  teeth(g, cx - rx + 1.5, cy + open - 1, rx * 2 - 3, Math.max(3, (rx * 0.5) | 0), Math.min(open * 0.7, rx * 0.75), false);
+  if (drooling) drool(g, cx, cy + open, rx);
+}
+
+// fan of curved talons out of a point
+function claws(g, x, y, dir, n, len) {
+  g.fillStyle = "#cfc4a6";
+  for (let i = 0; i < n; i++) {
+    const a = dir + (i - (n - 1) / 2) * 0.42;
+    const tx = x + Math.cos(a) * len, ty = y + Math.sin(a) * len;
+    const px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
     g.beginPath();
-    g.moveTo(cx - 6, bottom - h + 3); g.lineTo(cx - 1, bottom - h + 8);
-    g.moveTo(cx - 1, bottom - h + 3); g.lineTo(cx - 6, bottom - h + 8);
+    g.moveTo(x - px * 1.3, y - py * 1.3);
+    g.lineTo(x + px * 1.3, y + py * 1.3);
+    g.quadraticCurveTo(x + Math.cos(a) * len * 0.6 + px * 2.2, y + Math.sin(a) * len * 0.6 + py * 2.2, tx, ty);
+    g.closePath();
+    g.fill();
+  }
+}
+
+// raked claw scars: dark gashes with wet red centres
+function gashes(g, x, y, len, ang, n = 3) {
+  g.save();
+  g.translate(x, y);
+  g.rotate(ang);
+  for (let i = 0; i < n; i++) {
+    const oy = i * 3.2 - (n - 1) * 1.6;
+    g.strokeStyle = "#30060a";
+    g.lineWidth = 2.2;
+    g.beginPath();
+    g.moveTo(-len / 2, oy);
+    g.lineTo(len / 2, oy + 1);
+    g.stroke();
+    g.strokeStyle = "#a01818";
+    g.lineWidth = 0.9;
+    g.beginPath();
+    g.moveTo(-len / 2 + 1, oy);
+    g.lineTo(len / 2 - 1, oy + 0.8);
+    g.stroke();
+  }
+  g.restore();
+}
+
+function bloodRun(g, x, y, len) {
+  g.strokeStyle = "#6e0d10";
+  g.lineWidth = 1.1;
+  g.beginPath();
+  g.moveTo(x, y);
+  g.lineTo(x + 0.6, y + len);
+  g.stroke();
+  g.fillStyle = "#8e1216";
+  g.fillRect(x - 0.4, y + len - 1, 1.6, 2);
+}
+
+// one limb segment: dark under-layer, muscle fill, top highlight
+function limb(g, pal, x0, y0, x1, y1, w) {
+  g.lineCap = "round";
+  g.strokeStyle = pal.dark;
+  g.lineWidth = w + 2;
+  g.beginPath();
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.stroke();
+  g.strokeStyle = pal.body;
+  g.lineWidth = w;
+  g.beginPath();
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.stroke();
+  g.strokeStyle = pal.lite;
+  g.lineWidth = Math.max(0.9, w * 0.32);
+  g.beginPath();
+  g.moveTo(x0 - 0.8, y0 - 0.8);
+  g.lineTo(x1 - 0.8, y1 - 0.8);
+  g.stroke();
+}
+
+// curved keratin horn: a filled wedge tapering to a sharp pale tip
+function horn(g, x0, y0, mx, my, tx, ty, w) {
+  const nx = -(my - y0), ny = mx - x0;
+  const nl = Math.hypot(nx, ny) || 1;
+  const ox = (nx / nl) * w * 0.55, oy = (ny / nl) * w * 0.55;
+  g.fillStyle = "#42311c";
+  g.beginPath();
+  g.moveTo(x0 - ox, y0 - oy);
+  g.quadraticCurveTo(mx - ox, my - oy, tx, ty);
+  g.quadraticCurveTo(mx + ox, my + oy, x0 + ox, y0 + oy);
+  g.closePath();
+  g.fill();
+  g.fillStyle = "#8a7448";
+  g.beginPath();
+  g.moveTo(x0 - ox * 0.45, y0 - oy * 0.45);
+  g.quadraticCurveTo(mx - ox * 0.45, my - oy * 0.45, tx, ty);
+  g.quadraticCurveTo(mx + ox * 0.25, my + oy * 0.25, x0 + ox * 0.25, y0 + oy * 0.25);
+  g.closePath();
+  g.fill();
+  g.fillStyle = "#d9cba4";
+  g.beginPath();
+  g.arc(tx, ty, Math.max(0.8, w * 0.22), 0, 7);
+  g.fill();
+}
+
+// Groomp — hunched spined stalker with overlong clawed arms
+function drawImp(g, pal, pose) {
+  const cx = 32, step = pose.step ? 2.5 : -2.5;
+  // digitigrade legs
+  for (const s of [-1, 1]) {
+    const k = s * step * 0.5;
+    limb(g, pal, cx + s * 6, 40, cx + s * 11 + k, 48, 5);
+    limb(g, pal, cx + s * 11 + k, 48, cx + s * 8 + k, 56, 3.6);
+    limb(g, pal, cx + s * 8 + k, 56, cx + s * 12 + k, 60, 3);
+    claws(g, cx + s * 12 + k, 60, Math.PI / 2 - s * 0.55, 2, 3.6);
+  }
+  // hunched torso
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx, 31, 12.5, 12, -0.12, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx - 1, 30, 11, 10.5, -0.12, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 4, 26, 6, 4.6, -0.3, 0, 7); g.fill();
+  // starved rib shadows
+  g.strokeStyle = pal.dark;
+  g.lineWidth = 1.1;
+  for (let i = 0; i < 3; i++) {
+    g.beginPath(); g.arc(cx - 1, 27 + i * 4, 7 - i, 0.5, Math.PI - 0.7); g.stroke();
+  }
+  // dorsal spine ridge cresting over the shoulders
+  for (let i = 0; i < 5; i++) {
+    const sx = cx - 10.8 + i * 5.4, sy = 22 - Math.sin((i / 4) * Math.PI) * 3.5;
+    g.fillStyle = i % 2 ? "#b4a480" : "#cbbb94";
+    g.beginPath();
+    g.moveTo(sx - 1.7, sy + 3);
+    g.lineTo(sx + 1.7, sy + 3);
+    g.lineTo(sx + (i - 2) * 0.6, sy - 4);
+    g.closePath();
+    g.fill();
+  }
+  // arms — right one rears back with a fireball when attacking
+  for (const s of [-1, 1]) {
+    const raise = pose.attack && s > 0 ? -14 : 0;
+    const ex = cx + s * 17, ey = 37 + raise * 0.55;
+    const hx = cx + s * 21, hy = 33 + raise;
+    limb(g, pal, cx + s * 9, 25, ex, ey, 4.4);
+    limb(g, pal, ex, ey, hx, hy, 3.4);
+    claws(g, hx, hy, (pose.attack && s > 0) ? -1.2 : Math.PI / 2 - s * 0.37, 3, 4.6);
+    if (pose.attack && s > 0) {
+      const fb = g.createRadialGradient(hx + 1, hy - 4, 0.5, hx + 1, hy - 4, 8);
+      fb.addColorStop(0, "#fff8c0");
+      fb.addColorStop(0.5, "#ff9020");
+      fb.addColorStop(1, "rgba(255,60,0,0)");
+      g.fillStyle = fb;
+      g.beginPath(); g.arc(hx + 1, hy - 4, 8, 0, 7); g.fill();
+    }
+  }
+  // head slung low between the shoulders
+  const hy0 = 15;
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx, hy0, 9.5, 8.6, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx - 0.5, hy0 - 0.5, 8.4, 7.6, 0, 0, 7); g.fill();
+  horn(g, cx - 5.5, hy0 - 5, cx - 9.5, hy0 - 10, cx - 11, hy0 - 15, 3);
+  horn(g, cx + 5.5, hy0 - 5, cx + 9.5, hy0 - 10, cx + 11, hy0 - 15, 3);
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx, hy0 - 4, 6.8, 2, 0, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx, hy0 - 1.5, 3.9, "#ff7a10", 1.1);
+  gapingMaw(g, cx, hy0 + 4.6, 5.5, pose.attack ? 3.8 : 2.7, true);
+  // an old raking wound
+  gashes(g, cx + 4.5, 30, 8, 0.5, 2);
+  bloodRun(g, cx + 5.5, 33, 5);
+}
+
+// Spitter — bloated floating horror, one bloodshot eye, crown of spikes
+function drawCacodemon(g, pal, pose) {
+  const cy = 29, cx = 32 + (pose.step ? 2 : -2);
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.arc(cx, cy, 22, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.arc(cx - 1, cy - 1.5, 20.4, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 7, cy - 11, 9, 5.6, -0.5, 0, 7); g.fill();
+  // pocked, cratered hide
+  for (let i = 0; i < 9; i++) {
+    const a = hash2(i * 31, 5) * 6.28, r = 8 + hash2(i * 17, 9) * 11;
+    g.fillStyle = "rgba(20,4,6,0.55)";
+    g.beginPath();
+    g.ellipse(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.8 - 2, 1.6 + hash2(i, 3) * 1.6, 1.1 + hash2(i, 7), 0, 0, 7);
+    g.fill();
+  }
+  // keratin spikes across the crown
+  for (let i = 0; i < 5; i++) {
+    const a = -2.42 + i * 0.44;
+    const bx = cx + Math.cos(a) * 19, by = cy + Math.sin(a) * 19;
+    const tx = cx + Math.cos(a) * 27.5, ty = cy + Math.sin(a) * 27.5;
+    g.fillStyle = i % 2 ? "#8d7f60" : "#a99a75";
+    g.beginPath();
+    g.moveTo(bx + Math.sin(a) * 2.2, by - Math.cos(a) * 2.2);
+    g.lineTo(bx - Math.sin(a) * 2.2, by + Math.cos(a) * 2.2);
+    g.lineTo(tx, ty);
+    g.closePath();
+    g.fill();
+  }
+  // vast maw
+  const open = pose.attack ? 12 : 7;
+  gapingMaw(g, cx, cy + 10, 15, open, true);
+  if (pose.attack) {
+    const fb = g.createRadialGradient(cx, cy + 12, 0.5, cx, cy + 12, 7);
+    fb.addColorStop(0, "#ffe9c0");
+    fb.addColorStop(0.5, "#ff5a10");
+    fb.addColorStop(1, "rgba(200,30,0,0)");
+    g.fillStyle = fb;
+    g.beginPath(); g.arc(cx, cy + 12, 7, 0, 7); g.fill();
+  }
+  // the eye
+  if (!pose.pain) {
+    g.fillStyle = "#0d0406";
+    g.beginPath(); g.ellipse(cx, cy - 5, 9.6, 8, 0, 0, 7); g.fill();
+    g.fillStyle = "#d8cebc";
+    g.beginPath(); g.ellipse(cx, cy - 5, 8, 6.4, 0, 0, 7); g.fill();
+    g.strokeStyle = "#a02018";
+    g.lineWidth = 0.8;
+    for (let i = 0; i < 7; i++) {
+      const a = i * 0.9 + 0.25;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * 7.6, cy - 5 + Math.sin(a) * 6);
+      g.lineTo(cx + Math.cos(a) * 3.4 + hash2(i, 2) - 0.5, cy - 5 + Math.sin(a) * 2.8);
+      g.stroke();
+    }
+    g.fillStyle = "#c8a018";
+    g.beginPath(); g.ellipse(cx, cy - 5, 3.9, 4.8, 0, 0, 7); g.fill();
+    g.fillStyle = "#070204";
+    g.beginPath(); g.ellipse(cx, cy - 5, 1.3, 4.4, 0, 0, 7); g.fill();
+    // hooded lid
+    g.fillStyle = pal.body;
+    g.beginPath(); g.ellipse(cx, cy - 10.8, 8.4, 3, 0, 0, 7); g.fill();
+    g.strokeStyle = "#1a0406";
+    g.lineWidth = 1.1;
+    g.beginPath();
+    g.moveTo(cx - 8, cy - 8.4);
+    g.quadraticCurveTo(cx, cy - 11.2, cx + 8, cy - 8.4);
     g.stroke();
   } else {
-    g.fillStyle = pal.dark;
+    g.strokeStyle = "#14040a";
+    g.lineWidth = 2;
     g.beginPath();
-    g.ellipse(cx, bottom - 3, 25, 5.5, 0, 0, 7);
-    g.fill();
-    g.fillStyle = pal.body;
-    g.beginPath();
-    g.ellipse(cx - 4, bottom - 4, 17, 4, 0, 0, 7);
-    g.fill();
-    g.fillStyle = "#d3c9b4";
-    g.fillRect(cx + 5, bottom - 7, 6, 2);
-    g.fillRect(cx - 2, bottom - 6, 3, 2);
-    if (s >= 1) {
-      g.fillStyle = pal.lite;
+    g.moveTo(cx - 7, cy - 5.5);
+    g.quadraticCurveTo(cx, cy - 3, cx + 7, cy - 5.5);
+    g.stroke();
+    for (let i = -2; i <= 2; i++) {
       g.beginPath();
-      g.ellipse(cx - 8, bottom - 5, 6, 1.6, 0, 0, 7);
+      g.moveTo(cx + i * 3, cy - 4.4 + Math.abs(i) * 0.4);
+      g.lineTo(cx + i * 3.4, cy - 1);
+      g.stroke();
+    }
+  }
+  gashes(g, cx + 10, cy - 13, 9, -0.7, 2);
+}
+
+// Groompfather — hulking half-mechanical demon lord with a rocket arm
+function drawCyberdemon(g, pal, pose) {
+  const cx = 32, lean = pose.step ? 1.5 : -1.5;
+  // flesh leg (left) ending in a cloven hoof
+  limb(g, pal, cx - 8 + lean, 38, cx - 12 + lean, 50, 7);
+  limb(g, pal, cx - 12 + lean, 50, cx - 9 + lean * 0.5, 59, 5);
+  g.fillStyle = "#241a12";
+  g.beginPath();
+  g.moveTo(cx - 14 + lean * 0.5, 64);
+  g.lineTo(cx - 9 + lean * 0.5, 56);
+  g.lineTo(cx - 4 + lean * 0.5, 64);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = "#0c0806";
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(cx - 9 + lean * 0.5, 59); g.lineTo(cx - 9 + lean * 0.5, 64); g.stroke();
+  // hydraulic metal leg (right), hip buried in the flesh
+  g.fillStyle = "#38404c";
+  g.fillRect(cx + 6 + lean, 42, 8, 8);
+  g.fillStyle = "#5a6474";
+  g.fillRect(cx + 6 + lean, 42, 8, 1.6);
+  g.fillStyle = "#9aa4b4";
+  g.fillRect(cx + 8.5 + lean, 49, 2, 6);
+  g.fillStyle = "#2c323c";
+  g.fillRect(cx + 5 + lean * 0.5, 54, 9, 7);
+  g.fillStyle = "#454e5c";
+  g.fillRect(cx + 5 + lean * 0.5, 54, 9, 1.4);
+  g.fillStyle = "#181c24";
+  g.fillRect(cx + 3 + lean * 0.5, 61, 13, 3);
+  g.fillStyle = "#78828e";
+  g.fillRect(cx + 7 + lean, 44.5, 1.4, 1.4);
+  g.fillRect(cx + 11 + lean, 46.5, 1.4, 1.4);
+  // torso
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 30, 20, 16, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 1, 29, 18, 14.4, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx + lean - 7, 22.5, 8, 5, -0.4, 0, 7); g.fill();
+  // musculature
+  g.strokeStyle = pal.dark;
+  g.lineWidth = 1.4;
+  g.beginPath(); g.arc(cx + lean - 6, 25, 6, 0.3, Math.PI - 0.5); g.stroke();
+  g.beginPath(); g.arc(cx + lean + 6, 25, 6, 0.45, Math.PI - 0.3); g.stroke();
+  g.beginPath(); g.moveTo(cx + lean, 30); g.lineTo(cx + lean, 42); g.stroke();
+  for (let i = 0; i < 3; i++) {
+    g.beginPath();
+    g.moveTo(cx + lean - 5, 33 + i * 3.4);
+    g.lineTo(cx + lean + 5, 33 + i * 3.4);
+    g.stroke();
+  }
+  // metal graft bolted into the flank, flesh inflamed at the seam
+  g.fillStyle = "#38404c";
+  g.fillRect(cx + lean + 9, 30, 9, 8);
+  g.fillStyle = "#5a6474";
+  g.fillRect(cx + lean + 9, 30, 9, 1.4);
+  g.fillStyle = "#78828e";
+  g.fillRect(cx + lean + 10.5, 32.5, 1.4, 1.4);
+  g.fillRect(cx + lean + 15.5, 35, 1.4, 1.4);
+  g.strokeStyle = "#6e1014";
+  g.lineWidth = 1;
+  g.strokeRect(cx + lean + 8.5, 29.5, 10, 9);
+  bloodRun(g, cx + lean + 11, 38, 4);
+  // cabling out of the graft
+  g.strokeStyle = "#20242c";
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(cx + lean + 13, 38);
+  g.quadraticCurveTo(cx + lean + 18, 42, cx + lean + 14, 45);
+  g.stroke();
+  // left arm — huge, clawed
+  {
+    const ex = cx - 19 + lean, ey = 34;
+    limb(g, pal, cx - 15 + lean, 24, ex, ey, 6.5);
+    limb(g, pal, ex, ey, ex - 1, 42, 5);
+    claws(g, ex - 1, 42, Math.PI / 2 + 0.3, 3, 5.5);
+  }
+  // rocket arm (right)
+  g.fillStyle = "#2a303a";
+  g.beginPath(); g.ellipse(cx + 16 + lean, 24, 6.5, 5.4, 0.15, 0, 7); g.fill();
+  g.fillStyle = "#414a58";
+  g.fillRect(cx + 13 + lean, 22, 16, 7);
+  g.fillStyle = "#5c6678";
+  g.fillRect(cx + 13 + lean, 22, 16, 1.6);
+  g.fillStyle = "rgba(12,10,10,0.65)";
+  g.beginPath(); g.arc(cx + 29 + lean, 25.5, 4.4, 0, 7); g.fill();
+  g.fillStyle = "#161a22";
+  g.fillRect(cx + 26 + lean, 21, 5, 9.4);
+  g.fillStyle = "#05060a";
+  g.beginPath(); g.arc(cx + 28.8 + lean, 25.5, 2.6, 0, 7); g.fill();
+  if (pose.attack) {
+    const mf = g.createRadialGradient(cx + 32 + lean, 25.5, 0.5, cx + 32 + lean, 25.5, 8);
+    mf.addColorStop(0, "#fff8c0");
+    mf.addColorStop(0.6, "#ff8020");
+    mf.addColorStop(1, "rgba(255,60,0,0)");
+    g.fillStyle = mf;
+    g.beginPath(); g.arc(cx + 32 + lean, 25.5, 8, 0, 7); g.fill();
+  }
+  // head — small on the vast frame, crowned with bull horns
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 12.5, 8.6, 8, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 0.5, 12, 7.6, 7.2, 0, 0, 7); g.fill();
+  horn(g, cx + lean - 6, 8.5, cx + lean - 14, 6, cx + lean - 16.5, 0.5, 3.8);
+  horn(g, cx + lean + 6, 8.5, cx + lean + 14, 6, cx + lean + 16.5, 0.5, 3.8);
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 9.5, 7, 2.6, 0, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx + lean, 12, 3.4, "#ff3010", 1.3);
+  gapingMaw(g, cx + lean, 17.5, 4.8, pose.attack ? 3.2 : 2.4, false);
+}
+
+// Wraith — screaming skull wrapped in fire
+function drawLostSoul(g, pal, pose) {
+  const cx = 32 + (pose.step ? 2.5 : -2.5), cy = 28;
+  // fire shroud
+  const tongues = [
+    [cx - 5, cy - 16, 7], [cx + 5, cy - 14, 6], [cx, cy - 18, 8],
+    [cx - 11, cy - 4, 5.5], [cx + 11, cy - 4, 5.5], [cx - 7, cy + 12, 5], [cx + 6, cy + 13, 5.5],
+  ];
+  if (pose.attack) tongues.push([cx - 14, cy - 10, 6], [cx + 14, cy - 10, 6], [cx, cy - 24, 7]);
+  for (const [fx, fy, fr] of tongues) {
+    const fl = g.createRadialGradient(fx, fy, 0.5, fx, fy, fr * 1.7);
+    fl.addColorStop(0, "#fff8a0");
+    fl.addColorStop(0.4, "#ff7010");
+    fl.addColorStop(1, "rgba(180,40,0,0)");
+    g.fillStyle = fl;
+    g.beginPath();
+    g.ellipse(fx, fy, fr * 0.6, fr, (fx - cx) * 0.03, 0, 7);
+    g.fill();
+  }
+  // skull
+  const P = [
+    [-12, -3], [-11.5, -9], [-6, -13.5], [0, -14.5], [6, -13.5], [11.5, -9], [12, -3],
+    [11, 2], [8, 3.5], [8.5, 7.5], [5, 10.5], [-5, 10.5], [-8.5, 7.5], [-8, 3.5], [-11, 2],
+  ];
+  g.fillStyle = pal.dark;
+  g.beginPath();
+  for (let i = 0; i < P.length; i++) {
+    const [px, py] = P[i];
+    i ? g.lineTo(cx + px * 1.08, cy - 1 + py * 1.08) : g.moveTo(cx + px * 1.08, cy - 1 + py * 1.08);
+  }
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath();
+  for (let i = 0; i < P.length; i++) {
+    const [px, py] = P[i];
+    i ? g.lineTo(cx + px, cy - 1 + py) : g.moveTo(cx + px, cy - 1 + py);
+  }
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 4, cy - 9, 6, 4, -0.4, 0, 7); g.fill();
+  // temple hollows and cheekbones
+  g.fillStyle = "rgba(40,30,14,0.5)";
+  g.beginPath(); g.ellipse(cx - 9, cy + 3, 2.6, 3.4, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 9, cy + 3, 2.6, 3.4, -0.3, 0, 7); g.fill();
+  // cracked cranium
+  g.strokeStyle = "#4e442e";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(cx + 3, cy - 14);
+  g.lineTo(cx + 5, cy - 10);
+  g.lineTo(cx + 3, cy - 7);
+  g.lineTo(cx + 6.5, cy - 5);
+  g.stroke();
+  // sockets
+  g.fillStyle = "#060304";
+  g.beginPath(); g.ellipse(cx - 5, cy - 2.5, 3.8, 4.4, 0.15, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 5, cy - 2.5, 3.8, 4.4, -0.15, 0, 7); g.fill();
+  if (!pose.pain) {
+    glowEye(g, cx - 4.6, cy - 2, 1.2, "#ff5010");
+    glowEye(g, cx + 5.4, cy - 2, 1.2, "#ff5010");
+  }
+  // nasal cavity
+  g.fillStyle = "#0a0605";
+  g.beginPath();
+  g.moveTo(cx - 1.8, cy + 5.5);
+  g.lineTo(cx, cy + 1.5);
+  g.lineTo(cx + 1.8, cy + 5.5);
+  g.closePath();
+  g.fill();
+  // upper teeth in the maxilla
+  g.fillStyle = "#e2d9c2";
+  g.fillRect(cx - 5.5, cy + 8, 11, 3.6);
+  g.strokeStyle = "#6a5c40";
+  g.lineWidth = 0.8;
+  for (let i = -2; i <= 2; i++) {
+    g.beginPath(); g.moveTo(cx + i * 2.2, cy + 8); g.lineTo(cx + i * 2.2, cy + 11.6); g.stroke();
+  }
+  // unhinged jaw, hanging crooked
+  const drop = pose.attack ? 7 : 4;
+  g.fillStyle = pal.body;
+  g.beginPath();
+  g.moveTo(cx - 5.5, cy + 10 + drop);
+  g.lineTo(cx + 6, cy + 10.5 + drop);
+  g.lineTo(cx + 4.5, cy + 14 + drop);
+  g.lineTo(cx - 4, cy + 13.5 + drop);
+  g.closePath();
+  g.fill();
+  teeth(g, cx - 4.5, cy + 10.5 + drop, 9.5, 4, 2.4, false);
+}
+
+// Skitter — pulsing exposed brain riding jointed chitin legs
+function drawArachnotron(g, pal, pose) {
+  const cx = 32, cy = 42;
+  // legs: two joints each, spiked at the knee
+  for (let i = 0; i < 4; i++) {
+    for (const s of [-1, 1]) {
+      const ph = ((i + (pose.step ? 1 : 0)) % 2) ? 3 : -2;
+      const kx = cx + s * (12 + i * 3.4), ky = cy - 8 + ph;
+      const fx = cx + s * (16 + i * 4.2), fy = 62;
+      g.strokeStyle = "#10160e";
+      g.lineWidth = 3.4;
+      g.lineCap = "round";
+      g.beginPath(); g.moveTo(cx + s * 7, cy); g.lineTo(kx, ky); g.lineTo(fx, fy); g.stroke();
+      g.strokeStyle = "#31402a";
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(cx + s * 7, cy); g.lineTo(kx, ky); g.stroke();
+      g.strokeStyle = "#25301e";
+      g.beginPath(); g.moveTo(kx, ky); g.lineTo(fx, fy); g.stroke();
+      g.strokeStyle = "#5a7048";
+      g.lineWidth = 0.9;
+      g.beginPath(); g.moveTo(cx + s * 7, cy - 1); g.lineTo(kx, ky - 1.2); g.stroke();
+      // knee spike
+      g.fillStyle = "#0e130c";
+      g.beginPath();
+      g.moveTo(kx - 1.6, ky);
+      g.lineTo(kx + 1.6, ky);
+      g.lineTo(kx, ky - 4);
+      g.closePath();
       g.fill();
+    }
+  }
+  // armored chassis
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx, cy, 14, 8, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx, cy - 1, 12.6, 6.6, 0, 0, 7); g.fill();
+  g.strokeStyle = pal.lite;
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(cx - 10, cy - 3.5); g.lineTo(cx + 10, cy - 3.5); g.stroke();
+  // vents
+  g.fillStyle = "#0c100a";
+  for (let i = -1; i <= 1; i++) g.fillRect(cx + i * 6 - 2, cy + 1, 4, 1.4);
+  // plasma cannon slung under the chassis
+  g.fillStyle = "#181c18";
+  g.fillRect(cx - 2.6, cy + 5, 5.2, 10);
+  g.fillStyle = "#2c342c";
+  g.fillRect(cx - 2.6, cy + 5, 1.5, 10);
+  g.fillStyle = "#080a08";
+  g.beginPath(); g.ellipse(cx, cy + 15, 3, 2, 0, 0, 7); g.fill();
+  if (pose.attack) {
+    const pf = g.createRadialGradient(cx, cy + 18, 0.5, cx, cy + 18, 7.5);
+    pf.addColorStop(0, "#e8ffd8");
+    pf.addColorStop(0.5, "#30d830");
+    pf.addColorStop(1, "rgba(0,160,0,0)");
+    g.fillStyle = pf;
+    g.beginPath(); g.arc(cx, cy + 18, 7.5, 0, 7); g.fill();
+  }
+  // the brain, naked and wet
+  g.fillStyle = "#43201e";
+  g.beginPath(); g.ellipse(cx, cy - 10, 11.6, 8.6, 0, Math.PI, 0); g.fill();
+  g.fillStyle = "#8e5c56";
+  g.beginPath(); g.ellipse(cx - 0.5, cy - 10.5, 10.4, 7.6, 0, Math.PI, 0); g.fill();
+  g.fillStyle = "#b58078";
+  g.beginPath(); g.ellipse(cx - 3.5, cy - 13, 5, 3.4, -0.3, 0, 7); g.fill();
+  // sulci wrinkles
+  g.strokeStyle = "#4e2a26";
+  g.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const wx = cx - 8 + hash2(i * 7, 3) * 16, wy = cy - 16 + hash2(i * 3, 11) * 6;
+    const a0 = hash2(i, 5) * 3;
+    g.beginPath(); g.arc(wx, wy, 1.8 + hash2(i, 9) * 2, a0, a0 + 2.4); g.stroke();
+  }
+  // throbbing veins
+  g.strokeStyle = "#c03028";
+  g.lineWidth = 0.9;
+  g.beginPath();
+  g.moveTo(cx - 9, cy - 10);
+  g.quadraticCurveTo(cx - 6, cy - 15, cx - 2, cy - 13);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(cx + 8, cy - 11);
+  g.quadraticCurveTo(cx + 5, cy - 16, cx + 1, cy - 15);
+  g.stroke();
+  // ichor weeping where brain meets metal
+  bloodRun(g, cx - 7, cy - 9, 3);
+  bloodRun(g, cx + 6, cy - 9, 4);
+  // eye cluster
+  if (!pose.pain) {
+    g.fillStyle = "#070308";
+    for (const [ex, ey, er] of [[-5, -8, 1.8], [5, -8, 1.8], [-2, -5.5, 1.2], [2, -5.5, 1.2]]) {
+      g.beginPath(); g.ellipse(cx + ex, cy + ey, er + 0.8, er + 0.6, 0, 0, 7); g.fill();
+    }
+    glowEye(g, cx - 5, cy - 8, 0.9, "#60e880");
+    glowEye(g, cx + 5, cy - 8, 0.9, "#60e880");
+    glowEye(g, cx - 2, cy - 5.5, 0.6, "#60e880");
+    glowEye(g, cx + 2, cy - 5.5, 0.6, "#60e880");
+  }
+}
+
+// Brute — towering goat-legged muscle demon
+function drawBaron(g, pal, pose) {
+  const cx = 32, lean = pose.step ? 1.5 : -1.5;
+  // goat legs
+  for (const s of [-1, 1]) {
+    limb(g, pal, cx + s * 7, 40, cx + s * 11 + lean, 50, 6);
+    limb(g, pal, cx + s * 11 + lean, 50, cx + s * 8 + lean * 0.5, 58, 4);
+    // fur shag on the thigh
+    g.strokeStyle = pal.dark;
+    g.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      g.beginPath();
+      g.moveTo(cx + s * (8 + i * 1.6), 44 + i * 2);
+      g.lineTo(cx + s * (9 + i * 1.6), 48 + i * 2);
+      g.stroke();
+    }
+    // cloven hoof
+    g.fillStyle = "#171310";
+    g.beginPath();
+    g.moveTo(cx + s * 12 + lean * 0.5, 64);
+    g.lineTo(cx + s * 8 + lean * 0.5, 56);
+    g.lineTo(cx + s * 4 + lean * 0.5, 64);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = "#060404";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(cx + s * 8 + lean * 0.5, 59);
+    g.lineTo(cx + s * 8 + lean * 0.5, 64);
+    g.stroke();
+  }
+  // torso — pecs, abs, traps
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 28, 17, 15, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 1, 27, 15.4, 13.6, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx + lean - 6, 21, 7, 4.6, -0.4, 0, 7); g.fill();
+  g.strokeStyle = pal.dark;
+  g.lineWidth = 1.4;
+  g.beginPath(); g.arc(cx + lean - 5.5, 23, 5.5, 0.3, Math.PI - 0.5); g.stroke();
+  g.beginPath(); g.arc(cx + lean + 5.5, 23, 5.5, 0.45, Math.PI - 0.3); g.stroke();
+  g.beginPath(); g.moveTo(cx + lean, 28); g.lineTo(cx + lean, 39); g.stroke();
+  for (let i = 0; i < 3; i++) {
+    g.beginPath();
+    g.moveTo(cx + lean - 4.5, 31 + i * 3.2);
+    g.lineTo(cx + lean + 4.5, 31 + i * 3.2);
+    g.stroke();
+  }
+  // arms with bunched biceps and talons
+  for (const s of [-1, 1]) {
+    const rz = pose.attack ? -11 : 0;
+    limb(g, pal, cx + s * 13 + lean, 20, cx + s * 20 + lean, 30 + rz * 0.5, 6);
+    g.fillStyle = pal.body;
+    g.beginPath(); g.ellipse(cx + s * 16 + lean, 23 + rz * 0.2, 4, 3.2, s * 0.5, 0, 7); g.fill();
+    limb(g, pal, cx + s * 20 + lean, 30 + rz * 0.5, cx + s * 22 + lean, 37 + rz, 4.4);
+    claws(g, cx + s * 22 + lean, 38 + rz, pose.attack ? -1.3 : Math.PI / 2 - s * 0.37, 3, 5);
+    if (pose.attack) {
+      const pg = g.createRadialGradient(cx + s * 22 + lean, 33 + rz, 1, cx + s * 22 + lean, 33 + rz, 9);
+      pg.addColorStop(0, "#d8ffc8");
+      pg.addColorStop(0.5, "#38d030");
+      pg.addColorStop(1, "rgba(0,160,0,0)");
+      g.fillStyle = pg;
+      g.beginPath(); g.arc(cx + s * 22 + lean, 33 + rz, 9, 0, 7); g.fill();
+    }
+  }
+  // head: heavy muzzle, ram horns
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 11.5, 9.4, 8.8, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 0.5, 11, 8.4, 8, 0, 0, 7); g.fill();
+  horn(g, cx + lean - 7, 7, cx + lean - 12.5, 3.5, cx + lean - 15, 0.5, 3.4);
+  horn(g, cx + lean + 7, 7, cx + lean + 12.5, 3.5, cx + lean + 15, 0.5, 3.4);
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 8.8, 6, 1.7, 0, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx + lean, 11, 4, "#e8d838", 1.2);
+  // snout ridge and nostrils
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean, 15.5, 5, 3.4, 0, 0, 7); g.fill();
+  g.fillStyle = "#140a08";
+  g.beginPath(); g.ellipse(cx + lean - 2, 14.5, 1, 1.4, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + lean + 2, 14.5, 1, 1.4, -0.3, 0, 7); g.fill();
+  gapingMaw(g, cx + lean, 18.5, 5.2, pose.attack ? 3.4 : 2.5, true);
+}
+
+// Watcher — floating head that is mostly mouth, trailing tentacles
+function drawPainElemental(g, pal, pose) {
+  const cy = 26, cx = 32 + (pose.step ? 2.5 : -2.5);
+  // tentacles first, dangling and drifting
+  for (let i = 0; i < 4; i++) {
+    const tx = cx - 9 + i * 6;
+    const ph = (pose.step ? 1 : -1) * (i % 2 ? 2.5 : -2.5);
+    g.strokeStyle = pal.dark;
+    g.lineWidth = 2.8 - i * 0.15;
+    g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(tx, cy + 13);
+    g.quadraticCurveTo(tx + ph, cy + 21, tx - ph, cy + 28);
+    g.stroke();
+  }
+  // the head
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.arc(cx, cy, 17.5, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.arc(cx - 0.5, cy - 1, 16, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 6, cy - 9, 6.6, 4.2, -0.5, 0, 7); g.fill();
+  // cluster of crooked horns
+  for (const [hx, hy, tx2, ty2, w] of [
+    [cx - 9, cy - 12, cx - 14, cy - 20, 2.6],
+    [cx + 9, cy - 12, cx + 15, cy - 19, 2.6],
+    [cx + 2, cy - 15, cx + 5, cy - 23, 2],
+  ]) {
+    horn(g, hx, hy, (hx + tx2) / 2 + 2, (hy + ty2) / 2 - 2, tx2, ty2, w);
+  }
+  // pocks
+  for (let i = 0; i < 6; i++) {
+    const a = hash2(i * 13, 4) * 6.28, r = 7 + hash2(i * 7, 6) * 8;
+    g.fillStyle = "rgba(18,6,3,0.5)";
+    g.beginPath();
+    g.ellipse(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.7 - 3, 1.4 + hash2(i, 8), 1, 0, 0, 7);
+    g.fill();
+  }
+  // vertical maw splitting most of the face
+  const open = pose.attack ? 12 : 8;
+  gapingMaw(g, cx, cy + 5, 9, open, true);
+  if (pose.attack) {
+    // a skull crowning out of the gullet
+    g.fillStyle = "#dfd6bc";
+    g.beginPath(); g.arc(cx, cy + 7, 5, 0, 7); g.fill();
+    g.fillStyle = "#0a0606";
+    g.beginPath(); g.ellipse(cx - 2, cy + 6.5, 1.3, 1.6, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(cx + 2, cy + 6.5, 1.3, 1.6, 0, 0, 7); g.fill();
+    glowEye(g, cx - 2, cy + 6.5, 0.7, "#ff5010");
+    glowEye(g, cx + 2, cy + 6.5, 0.7, "#ff5010");
+    g.fillStyle = "#0a0606";
+    g.fillRect(cx - 2.4, cy + 10, 4.8, 1.2);
+  }
+  // three mismatched eyes above the maw
+  if (!pose.pain) {
+    socketEyes(g, cx, cy - 6.5, 5.5, "#ff3820", 1.3, 0.35);
+    g.fillStyle = "#070308";
+    g.beginPath(); g.ellipse(cx + 1.5, cy - 10.5, 2, 1.6, 0, 0, 7); g.fill();
+    glowEye(g, cx + 1.5, cy - 10.5, 0.8, "#ff3820");
+  }
+}
+
+// Hollow — creaking skeleton with scavenged missile pods
+function drawRevenant(g, pal, pose) {
+  const cx = 32, step = pose.step ? 2 : -2;
+  const bone = pal.body, boneLite = pal.lite, boneDark = pal.dark;
+  // legs: femur, knee knob, shin, toes
+  g.lineCap = "round";
+  for (const s of [-1, 1]) {
+    const kx = cx + s * (6 + (s > 0 ? step : -step)), fx = cx + s * (8 + (s > 0 ? step : -step) * 0.5);
+    g.strokeStyle = boneDark;
+    g.lineWidth = 3.8;
+    g.beginPath(); g.moveTo(cx + s * 4, 42); g.lineTo(kx, 52); g.lineTo(fx, 61); g.stroke();
+    g.strokeStyle = bone;
+    g.lineWidth = 2.4;
+    g.beginPath(); g.moveTo(cx + s * 4, 42); g.lineTo(kx, 52); g.lineTo(fx, 61); g.stroke();
+    g.fillStyle = boneLite;
+    g.beginPath(); g.arc(kx, 52, 2, 0, 7); g.fill();
+    g.strokeStyle = bone;
+    g.lineWidth = 1.6;
+    for (let t = 0; t < 3; t++) {
+      g.beginPath(); g.moveTo(fx, 61); g.lineTo(fx + s * (2 + t * 2), 63.5); g.stroke();
+    }
+  }
+  // pelvis
+  g.fillStyle = bone;
+  g.beginPath(); g.ellipse(cx - 4, 41.5, 4, 3, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 4, 41.5, 4, 3, -0.3, 0, 7); g.fill();
+  g.fillStyle = boneDark;
+  g.beginPath(); g.ellipse(cx, 42.5, 2, 2.4, 0, 0, 7); g.fill();
+  // spine of separate vertebrae
+  g.fillStyle = bone;
+  for (let i = 0; i < 6; i++) g.fillRect(cx - 1.6, 20 + i * 3.4, 3.2, 2.2);
+  // ribcage over a black cavity
+  g.fillStyle = "rgba(8,6,8,0.85)";
+  g.beginPath(); g.ellipse(cx, 28, 9, 9.5, 0, 0, 7); g.fill();
+  for (let i = 0; i < 4; i++) {
+    const ry = 22 + i * 4;
+    g.strokeStyle = i % 2 ? bone : boneLite;
+    g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(cx, ry); g.quadraticCurveTo(cx - 10, ry + 1, cx - 8.5, ry + 3.4); g.stroke();
+    g.beginPath(); g.moveTo(cx, ry); g.quadraticCurveTo(cx + 10, ry + 1, cx + 8.5, ry + 3.4); g.stroke();
+  }
+  // one rib snapped off short
+  g.strokeStyle = "#6e6248";
+  g.lineWidth = 1.8;
+  g.beginPath(); g.moveTo(cx, 34); g.quadraticCurveTo(cx - 5, 34.5, cx - 4, 35.5); g.stroke();
+  // harness strap across the chest
+  g.strokeStyle = "#2c2620";
+  g.lineWidth = 2.6;
+  g.beginPath(); g.moveTo(cx - 9, 20); g.lineTo(cx + 9, 36); g.stroke();
+  // shoulder-mounted missile pods, scorched
+  for (const s of [-1, 1]) {
+    const podY = pose.attack ? 13 : 20;
+    g.fillStyle = "#262b33";
+    g.beginPath(); g.ellipse(cx + s * 15.5, podY, 6, 7.5, s * 0.2, 0, 7); g.fill();
+    g.fillStyle = "#454e5c";
+    g.fillRect(cx + s * 15.5 - 4, podY - 7.5, 8, 2.6);
+    g.fillStyle = "rgba(8,6,6,0.7)";
+    g.beginPath(); g.ellipse(cx + s * 15.5, podY - 5.5, 4, 2.2, 0, 0, 7); g.fill();
+    for (let i = 0; i < 2; i++) {
+      g.fillStyle = "#0c0f16";
+      g.beginPath(); g.arc(cx + s * 14 + i * s * 3, podY - 5.6, 1.4, 0, 7); g.fill();
+    }
+    if (pose.attack) {
+      const mf = g.createRadialGradient(cx + s * 15.5, podY - 10, 0.5, cx + s * 15.5, podY - 10, 8);
+      mf.addColorStop(0, "#fff8c0");
+      mf.addColorStop(0.5, "#ff8020");
+      mf.addColorStop(1, "rgba(255,40,0,0)");
+      g.fillStyle = mf;
+      g.beginPath(); g.arc(cx + s * 15.5, podY - 10, 8, 0, 7); g.fill();
+    }
+  }
+  // arms of bare bone, reaching
+  for (const s of [-1, 1]) {
+    const rz = pose.attack ? -6 : 0;
+    g.strokeStyle = boneDark;
+    g.lineWidth = 3.4;
+    g.beginPath(); g.moveTo(cx + s * 8, 22); g.lineTo(cx + s * 16, 32 + rz); g.lineTo(cx + s * 15, 40 + rz); g.stroke();
+    g.strokeStyle = bone;
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(cx + s * 8, 22); g.lineTo(cx + s * 16, 32 + rz); g.lineTo(cx + s * 15, 40 + rz); g.stroke();
+    g.fillStyle = boneLite;
+    g.beginPath(); g.arc(cx + s * 16, 32 + rz, 1.8, 0, 7); g.fill();
+    g.strokeStyle = bone;
+    g.lineWidth = 1.3;
+    for (let i = -1; i <= 1; i++) {
+      g.beginPath();
+      g.moveTo(cx + s * 15, 40 + rz);
+      g.lineTo(cx + s * (17.5 + i * 1.2), 44.5 + rz + Math.abs(i));
+      g.stroke();
+    }
+  }
+  // skull
+  g.fillStyle = boneDark;
+  g.beginPath(); g.arc(cx, 12, 8.2, 0, 7); g.fill();
+  g.fillStyle = bone;
+  g.beginPath(); g.arc(cx - 0.3, 11.7, 7.3, 0, 7); g.fill();
+  g.fillStyle = boneLite;
+  g.beginPath(); g.ellipse(cx - 2.5, 8.5, 3.6, 2.4, -0.3, 0, 7); g.fill();
+  g.fillStyle = "rgba(40,30,14,0.45)";
+  g.beginPath(); g.ellipse(cx - 5.5, 14, 1.6, 2, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 5.5, 14, 1.6, 2, -0.3, 0, 7); g.fill();
+  g.fillStyle = "#060304";
+  g.beginPath(); g.ellipse(cx - 3, 11, 2.4, 3, 0.1, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 3, 11, 2.4, 3, -0.1, 0, 7); g.fill();
+  if (!pose.pain) {
+    glowEye(g, cx - 3, 11.3, 1, "#ff3820");
+    glowEye(g, cx + 3, 11.3, 1, "#ff3820");
+  }
+  g.fillStyle = "#0a0605";
+  g.beginPath();
+  g.moveTo(cx - 1.2, 15.5); g.lineTo(cx, 13.2); g.lineTo(cx + 1.2, 15.5);
+  g.closePath();
+  g.fill();
+  g.fillStyle = "#e2d9c2";
+  g.fillRect(cx - 3.6, 16.5, 7.2, 2.4);
+  g.strokeStyle = "#6a5c40";
+  g.lineWidth = 0.7;
+  for (let i = -1; i <= 1; i++) {
+    g.beginPath(); g.moveTo(cx + i * 1.8, 16.5); g.lineTo(cx + i * 1.8, 18.9); g.stroke();
+  }
+}
+
+// Maw — charging beast that is one huge blood-slick jaw
+function drawPinky(g, pal, pose) {
+  const cx = 32, step = pose.step ? 3 : -3;
+  // hindquarters, lower than the shoulder hump
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx - 10, 42, 9, 8, 0.2, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx - 10, 41, 7.6, 6.6, 0.2, 0, 7); g.fill();
+  // legs
+  for (const s of [-1, 1]) {
+    const k = step * s * 0.4;
+    limb(g, pal, cx + s * 10 + k, 42, cx + s * 12 + k, 52, 5.5);
+    limb(g, pal, cx + s * 12 + k, 52, cx + s * 11 + k, 59, 4.4);
+    claws(g, cx + s * 11 + k, 59.5, Math.PI / 2 - s * 0.4, 3, 4);
+  }
+  // shoulder hump with a ridge of spines
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + 2, 36, 15, 11, -0.1, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + 1, 35, 13.6, 9.6, -0.1, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 3, 31, 7, 4, -0.3, 0, 7); g.fill();
+  for (let i = 0; i < 4; i++) {
+    const sx = cx - 8 + i * 5, sy = 27.5 - Math.sin((i / 3) * Math.PI) * 2;
+    g.fillStyle = i % 2 ? "#8d7f60" : "#a99a75";
+    g.beginPath();
+    g.moveTo(sx - 1.6, sy + 3);
+    g.lineTo(sx + 1.6, sy + 3);
+    g.lineTo(sx + 0.4, sy - 3.4);
+    g.closePath();
+    g.fill();
+  }
+  gashes(g, cx - 8, 36, 7, 0.6, 2);
+  // the head is nearly all jaw
+  const headY = pose.attack ? 24 : 26;
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + 2, headY, 14.5, 12, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + 1.5, headY - 1, 13.2, 10.6, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 2, headY - 6, 6.6, 3.6, -0.2, 0, 7); g.fill();
+  // tiny eyes set wide and deep
+  if (!pose.pain) socketEyes(g, cx + 2, headY - 6, 6.5, "#ff8020", 1, 0.45);
+  // nostril slits
+  g.fillStyle = "#160a08";
+  g.beginPath(); g.ellipse(cx, headY - 2, 0.9, 1.3, 0.2, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 4, headY - 2, 0.9, 1.3, -0.2, 0, 7); g.fill();
+  // gaping jaw with oversized fangs
+  const open = pose.attack ? 9.5 : 6;
+  gapingMaw(g, cx + 2, headY + 6.5, 11.5, open, true);
+  // blood crusted around the lips
+  g.fillStyle = "rgba(110,10,14,0.55)";
+  g.beginPath(); g.ellipse(cx - 7, headY + 9, 2.6, 1.6, 0.4, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 11, headY + 8, 2.2, 1.4, -0.4, 0, 7); g.fill();
+  bloodRun(g, cx + 11, headY + 9, 4);
+}
+
+// Husk — cadaverous pyromancer, all ribs and too-long fingers
+function drawArchvile(g, pal, pose) {
+  const cx = 32, step = pose.step ? 1.5 : -1.5;
+  if (pose.attack) {
+    for (const [fx, fy] of [[cx - 10, 12], [cx + 10, 10], [cx - 3, 5], [cx + 4, 7]]) {
+      const fl = g.createRadialGradient(fx, fy, 0.5, fx, fy, 9);
+      fl.addColorStop(0, "#ffffff");
+      fl.addColorStop(0.4, "#80c8ff");
+      fl.addColorStop(1, "rgba(40,80,255,0)");
+      g.fillStyle = fl;
+      g.beginPath(); g.ellipse(fx, fy, 5, 9, 0, 0, 7); g.fill();
+    }
+  }
+  // stick legs with knee knobs, long bony feet
+  for (const s of [-1, 1]) {
+    const k = s > 0 ? -step : step;
+    limb(g, pal, cx + s * 4, 42, cx + s * 5 + k, 52, 3.4);
+    limb(g, pal, cx + s * 5 + k, 52, cx + s * 6 + k * 0.5, 60, 2.8);
+    g.fillStyle = pal.body;
+    g.beginPath(); g.arc(cx + s * 5 + k, 52, 1.8, 0, 7); g.fill();
+    g.strokeStyle = pal.body;
+    g.lineWidth = 1.4;
+    for (let t = 0; t < 3; t++) {
+      g.beginPath();
+      g.moveTo(cx + s * 6 + k * 0.5, 60);
+      g.lineTo(cx + s * (8 + t * 2) + k * 0.5, 63);
+      g.stroke();
+    }
+  }
+  // starved torso: every rib visible, hips jutting
+  g.fillStyle = pal.dark;
+  g.beginPath();
+  g.moveTo(cx - 9, 16); g.lineTo(cx + 9, 16); g.lineTo(cx + 5.5, 43); g.lineTo(cx - 5.5, 43);
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath();
+  g.moveTo(cx - 8, 17); g.lineTo(cx + 8, 17); g.lineTo(cx + 4.8, 42); g.lineTo(cx - 4.8, 42);
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 3, 20, 4, 2.6, -0.2, 0, 7); g.fill();
+  g.strokeStyle = pal.dark;
+  g.lineWidth = 1.2;
+  for (let i = 0; i < 4; i++) {
+    const ry = 21 + i * 3.6;
+    g.beginPath(); g.moveTo(cx, ry); g.quadraticCurveTo(cx - 7, ry + 0.6, cx - 6.5 + i * 0.5, ry + 2.4); g.stroke();
+    g.beginPath(); g.moveTo(cx, ry); g.quadraticCurveTo(cx + 7, ry + 0.6, cx + 6.5 - i * 0.5, ry + 2.4); g.stroke();
+  }
+  // sunken gut shadow
+  g.fillStyle = "rgba(20,14,8,0.5)";
+  g.beginPath(); g.ellipse(cx, 38.5, 3.4, 2.6, 0, 0, 7); g.fill();
+  // hip points
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 4.5, 42, 1.8, 1.2, 0.4, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 4.5, 42, 1.8, 1.2, -0.4, 0, 7); g.fill();
+  // arms: raised to conjure, or hanging past the knees
+  for (const s of [-1, 1]) {
+    let ex, ey, hx, hy, fdir;
+    if (pose.attack) {
+      ex = cx + s * 15; ey = 12; hx = cx + s * 18; hy = 4; fdir = -Math.PI / 2 + s * 0.3;
+    } else {
+      ex = cx + s * 12; ey = 30; hx = cx + s * 13; hy = 42; fdir = Math.PI / 2 + s * 0.2;
+    }
+    limb(g, pal, cx + s * 7, 19, ex, ey, 3.2);
+    limb(g, pal, ex, ey, hx, hy, 2.6);
+    // fingers, far too long
+    g.strokeStyle = pal.body;
+    g.lineWidth = 1.1;
+    for (let i = -1; i <= 1; i++) {
+      const fa = fdir + i * 0.35;
+      g.beginPath();
+      g.moveTo(hx, hy);
+      g.lineTo(hx + Math.cos(fa) * 6.5, hy + Math.sin(fa) * 6.5);
+      g.stroke();
+    }
+  }
+  // head: skin shrink-wrapped to the skull
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx, 9.5, 7.2, 8.2, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx - 0.3, 9, 6.3, 7.4, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx - 2, 5.5, 3.4, 2.4, -0.3, 0, 7); g.fill();
+  // hollow cheeks
+  g.fillStyle = "rgba(24,18,10,0.55)";
+  g.beginPath(); g.ellipse(cx - 4.2, 11.5, 1.8, 2.6, 0.25, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 4.2, 11.5, 1.8, 2.6, -0.25, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx, 7.5, 3.4, pose.attack ? "#e8f4ff" : "#5090d8", 0.8, 0.2);
+  // nose slits
+  g.fillStyle = "#181008";
+  g.fillRect(cx - 1.2, 10.5, 0.9, 1.6);
+  g.fillRect(cx + 0.4, 10.5, 0.9, 1.6);
+  // lipless grimace, teeth bared
+  g.fillStyle = "#e2d9c2";
+  g.fillRect(cx - 3.4, 13.5, 6.8, 2.2);
+  g.strokeStyle = "#3a2c1a";
+  g.lineWidth = 0.7;
+  g.beginPath(); g.moveTo(cx - 3.4, 14.6); g.lineTo(cx + 3.4, 14.6); g.stroke();
+  for (let i = -2; i <= 2; i++) {
+    g.beginPath(); g.moveTo(cx + i * 1.4, 13.5); g.lineTo(cx + i * 1.4, 15.7); g.stroke();
+  }
+}
+
+// Shrieker — battle-torn hell knight, one horn snapped, always screaming
+function drawHellKnight(g, pal, pose) {
+  const cx = 32, lean = pose.step ? 1.5 : -1.5;
+  for (const s of [-1, 1]) {
+    limb(g, pal, cx + s * 7, 39, cx + s * 11 + lean, 49, 5.6);
+    limb(g, pal, cx + s * 11 + lean, 49, cx + s * 8 + lean * 0.5, 57, 3.8);
+    g.fillStyle = "#171310";
+    g.beginPath();
+    g.moveTo(cx + s * 12 + lean * 0.5, 64);
+    g.lineTo(cx + s * 8 + lean * 0.5, 55);
+    g.lineTo(cx + s * 4 + lean * 0.5, 64);
+    g.closePath();
+    g.fill();
+  }
+  // torso, raked with deep old wounds
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 27, 16, 14.5, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 1, 26, 14.4, 13, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx + lean - 6, 20.5, 6.6, 4.2, -0.4, 0, 7); g.fill();
+  g.strokeStyle = pal.dark;
+  g.lineWidth = 1.3;
+  g.beginPath(); g.arc(cx + lean - 5, 22.5, 5, 0.3, Math.PI - 0.5); g.stroke();
+  g.beginPath(); g.arc(cx + lean + 5, 22.5, 5, 0.45, Math.PI - 0.3); g.stroke();
+  gashes(g, cx + lean + 2, 28, 11, 0.55, 3);
+  bloodRun(g, cx + lean + 4, 33, 6);
+  // shackle and snapped chain on the left wrist
+  for (const s of [-1, 1]) {
+    const rz = pose.attack ? -10 : 0;
+    limb(g, pal, cx + s * 12 + lean, 19, cx + s * 19 + lean, 29 + rz * 0.5, 5.4);
+    limb(g, pal, cx + s * 19 + lean, 29 + rz * 0.5, cx + s * 21 + lean, 36 + rz, 4);
+    claws(g, cx + s * 21 + lean, 37 + rz, pose.attack ? -1.3 : Math.PI / 2 - s * 0.37, 3, 4.6);
+    if (s < 0) {
+      g.strokeStyle = "#4a525c";
+      g.lineWidth = 1.8;
+      g.beginPath(); g.arc(cx + s * 20 + lean, 32.5 + rz, 2.4, 0, 7); g.stroke();
+      g.strokeStyle = "#343a42";
+      g.lineWidth = 1.3;
+      for (let l = 0; l < 3; l++) {
+        g.beginPath();
+        g.arc(cx + s * 21.5 + lean, 36 + rz + l * 2.6, 1.2, 0, 7);
+        g.stroke();
+      }
+    }
+    if (pose.attack) {
+      const pg = g.createRadialGradient(cx + s * 21 + lean, 32 + rz, 1, cx + s * 21 + lean, 32 + rz, 8.5);
+      pg.addColorStop(0, "#ffd8a0");
+      pg.addColorStop(0.5, "#c06018");
+      pg.addColorStop(1, "rgba(120,50,0,0)");
+      g.fillStyle = pg;
+      g.beginPath(); g.arc(cx + s * 21 + lean, 32 + rz, 8.5, 0, 7); g.fill();
+    }
+  }
+  // head thrown slightly back, shrieking
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 11, 9, 8.4, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 0.5, 10.5, 8, 7.6, 0, 0, 7); g.fill();
+  // right horn snapped to a jagged stump
+  horn(g, cx + lean - 7, 6.5, cx + lean - 12, 3, cx + lean - 14.5, 0.5, 3.2);
+  g.fillStyle = "#a08d66";
+  g.beginPath();
+  g.moveTo(cx + lean + 5, 7);
+  g.lineTo(cx + lean + 9, 4);
+  g.lineTo(cx + lean + 10, 6.5);
+  g.lineTo(cx + lean + 7, 8.5);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = "#3a2c18";
+  g.lineWidth = 0.9;
+  g.beginPath(); g.moveTo(cx + lean + 9, 4); g.lineTo(cx + lean + 10, 6.5); g.stroke();
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 8.3, 5.8, 1.6, 0, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx + lean, 10.5, 3.8, "#ffa020", 1.2);
+  // the shriek: jaw wrenched wide even at rest
+  gapingMaw(g, cx + lean, 16.5, 5, pose.attack ? 4.6 : 3.6, true);
+}
+
+// Demon — mountain of rancid flesh with grafted flame cannons
+function drawMancubus(g, pal, pose) {
+  const cx = 32, lean = pose.step ? 1 : -1;
+  // stub legs buried under the bulk
+  for (const s of [-1, 1]) {
+    limb(g, pal, cx + s * 10 + lean, 48, cx + s * 11 + lean, 57, 6.5);
+    g.fillStyle = "#2a2620";
+    g.fillRect(cx + s * 11 + lean - 5, 58, 10, 4);
+    g.fillStyle = "#453e34";
+    g.fillRect(cx + s * 11 + lean - 5, 58, 10, 1.2);
+  }
+  // the mass
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 35, 20, 17.5, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 1, 34, 18.4, 16, 0, 0, 7); g.fill();
+  g.fillStyle = pal.lite;
+  g.beginPath(); g.ellipse(cx + lean - 8, 26, 8, 5, -0.4, 0, 7); g.fill();
+  // side rolls
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 16, 36, 5, 7, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + lean + 16, 36, 5, 7, -0.3, 0, 7); g.fill();
+  // belly folds, each with a crease shadow and a sweaty highlight
+  for (let i = 0; i < 3; i++) {
+    const fy = 33 + i * 6, fr = 15 - i * 2.4;
+    g.strokeStyle = pal.dark;
+    g.lineWidth = 2;
+    g.beginPath(); g.arc(cx + lean, fy, fr, 0.25, Math.PI - 0.25); g.stroke();
+    g.strokeStyle = pal.lite;
+    g.lineWidth = 0.9;
+    g.beginPath(); g.arc(cx + lean, fy - 1.4, fr, 0.4, Math.PI - 0.4); g.stroke();
+  }
+  // crude stitched seam holding the gut together, weeping at the base
+  g.strokeStyle = "#3a0c0e";
+  g.lineWidth = 1.8;
+  g.beginPath(); g.moveTo(cx + lean + 6, 26); g.lineTo(cx + lean + 8, 44); g.stroke();
+  g.strokeStyle = "#1c1410";
+  g.lineWidth = 1.1;
+  for (let i = 0; i < 4; i++) {
+    const sy = 28 + i * 4.4;
+    g.beginPath();
+    g.moveTo(cx + lean + 4, sy);
+    g.lineTo(cx + lean + 10.5, sy + 2);
+    g.stroke();
+  }
+  bloodRun(g, cx + lean + 8, 44, 5);
+  // arm cannons bolted straight into the shoulders
+  for (const s of [-1, 1]) {
+    const rz = pose.attack ? -4 : 0;
+    g.fillStyle = pal.dark;
+    g.beginPath(); g.ellipse(cx + s * 18 + lean, 27 + rz, 6, 4.6, s * 0.3, 0, 7); g.fill();
+    g.strokeStyle = "#7c1418";
+    g.lineWidth = 1.6;
+    g.beginPath(); g.ellipse(cx + s * 21 + lean, 26 + rz, 4.4, 4.2, 0, 0, 7); g.stroke();
+    g.fillStyle = "#2c333d";
+    g.fillRect(cx + s * 21 + lean - 4, 22 + rz, 8, 8.4);
+    g.fillStyle = "#485261";
+    g.fillRect(cx + s * 21 + lean - 4, 22 + rz, 8, 1.6);
+    g.fillStyle = "#11141b";
+    g.fillRect(cx + s * 26 + lean - (s < 0 ? 4 : 0), 21.5 + rz, 4, 9.4);
+    g.fillStyle = "rgba(8,6,6,0.7)";
+    g.beginPath(); g.arc(cx + s * 28 + lean, 26 + rz, 3.6, 0, 7); g.fill();
+    g.fillStyle = "#04050a";
+    g.beginPath(); g.arc(cx + s * 28 + lean, 26 + rz, 2.2, 0, 7); g.fill();
+    // heat vents
+    g.fillStyle = "#0c0f14";
+    for (let i = 0; i < 2; i++) g.fillRect(cx + s * 21 + lean - 3, 24.5 + rz + i * 2.6, 6, 1);
+    if (pose.attack) {
+      const fb = g.createRadialGradient(cx + s * 33 + lean, 26 + rz, 0.5, cx + s * 33 + lean, 26 + rz, 10);
+      fb.addColorStop(0, "#ffffff");
+      fb.addColorStop(0.3, "#fff4a0");
+      fb.addColorStop(0.6, "#ff8020");
+      fb.addColorStop(1, "rgba(200,40,0,0)");
+      g.fillStyle = fb;
+      g.beginPath(); g.arc(cx + s * 33 + lean, 26 + rz, 10, 0, 7); g.fill();
+    }
+  }
+  // tiny head swallowed by the shoulders
+  g.fillStyle = pal.dark;
+  g.beginPath(); g.ellipse(cx + lean, 15, 7.6, 6.8, 0, 0, 7); g.fill();
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 0.3, 14.5, 6.8, 6, 0, 0, 7); g.fill();
+  // jowls
+  g.fillStyle = pal.body;
+  g.beginPath(); g.ellipse(cx + lean - 5, 18, 2.6, 2, 0.3, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + lean + 5, 18, 2.6, 2, -0.3, 0, 7); g.fill();
+  if (!pose.pain) socketEyes(g, cx + lean, 13.5, 3.2, "#e04020", 1, 0.4);
+  // slack mouth with tusks jutting up from the lower jaw
+  g.fillStyle = "#160808";
+  g.beginPath(); g.ellipse(cx + lean, 18.5, 3.8, 1.8, 0, 0, 7); g.fill();
+  g.fillStyle = "#d8cfb8";
+  g.beginPath();
+  g.moveTo(cx + lean - 4.4, 19.5); g.lineTo(cx + lean - 2.4, 19.5); g.lineTo(cx + lean - 3.6, 15.5);
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.moveTo(cx + lean + 2.4, 19.5); g.lineTo(cx + lean + 4.4, 19.5); g.lineTo(cx + lean + 3.6, 15.5);
+  g.closePath();
+  g.fill();
+  drool(g, cx + lean, 20, 3.5);
+}
+
+
+
+// ----------------------------------------------------- corpses & sheets
+// A death leaves a spreading pool of blood and picked-over remains,
+// derived per-palette so the gore matches the creature that fell.
+
+function drawPuddle(g, pal, s) {
+  const cx = 32, bottom = 61;
+  // spreading pool
+  const pr = 14 + s * 12;
+  g.fillStyle = "#38050a";
+  g.beginPath(); g.ellipse(cx, bottom, pr, 3.2 + s * 2, 0, 0, 7); g.fill();
+  g.fillStyle = "#5c0a0e";
+  g.beginPath(); g.ellipse(cx - 3, bottom - 0.5, pr * 0.7, 2.2 + s * 1.4, 0, 0, 7); g.fill();
+  g.fillStyle = "#8e1216";
+  for (let i = 0; i < 5; i++) {
+    g.fillRect(cx - pr * 0.6 + hash2(i * 7, 3) * pr * 1.2, bottom - 1 + hash2(i, 9) * 2, 2, 1);
+  }
+  if (s < 0.5) {
+    // fresh kill: the carcass slumped and split open
+    const h = 20 * (1 - s);
+    g.fillStyle = pal.dark;
+    g.beginPath(); g.ellipse(cx, bottom - h / 2 - 1, 15, h / 2 + 2, 0.08, 0, 7); g.fill();
+    g.fillStyle = pal.body;
+    g.beginPath(); g.ellipse(cx - 2, bottom - h / 2 - 2, 12, h / 2, 0.08, 0, 7); g.fill();
+    g.fillStyle = "#4a080c";
+    g.beginPath(); g.ellipse(cx + 2, bottom - h / 2 - 2, 6, h * 0.22 + 1, 0.3, 0, 7); g.fill();
+    g.fillStyle = "#8e1216";
+    g.beginPath(); g.ellipse(cx + 2, bottom - h / 2 - 2, 3.4, h * 0.13 + 0.8, 0.3, 0, 7); g.fill();
+    // a limb flung out
+    g.strokeStyle = pal.body;
+    g.lineWidth = 3;
+    g.lineCap = "round";
+    g.beginPath(); g.moveTo(cx - 12, bottom - h / 2); g.lineTo(cx - 19, bottom - 2); g.stroke();
+  } else {
+    // remains: a cage of ribs, a rolled skull, scattered gibs
+    g.fillStyle = pal.dark;
+    g.beginPath(); g.ellipse(cx - 2, bottom - 3, 14, 4, 0, 0, 7); g.fill();
+    g.fillStyle = pal.body;
+    g.beginPath(); g.ellipse(cx - 4, bottom - 4, 9, 2.8, 0, 0, 7); g.fill();
+    g.strokeStyle = "#cfc2a0";
+    g.lineWidth = 1.4;
+    for (let i = 0; i < 4; i++) {
+      g.beginPath();
+      g.arc(cx - 7 + i * 4, bottom - 4, 5 - i * 0.6, Math.PI * 1.05, Math.PI * 1.95);
+      g.stroke();
+    }
+    g.fillStyle = "#d5c9ac";
+    g.beginPath(); g.arc(cx + 12, bottom - 5, 4.2, 0, 7); g.fill();
+    g.fillRect(cx + 9.6, bottom - 3.5, 5.2, 3.2);
+    g.fillStyle = "#100a08";
+    g.fillRect(cx + 10, bottom - 6, 1.7, 2.1);
+    g.fillRect(cx + 13, bottom - 6, 1.7, 2.1);
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle = i % 2 ? "#7c1014" : pal.body;
+      g.fillRect(cx - 16 + hash2(i * 5, 1) * 26, bottom - 3 + hash2(i, 4) * 3, 2.4, 1.6);
+    }
+    if (s >= 1) {
+      g.strokeStyle = "#26030a";
+      g.lineWidth = 1;
+      g.beginPath(); g.ellipse(cx, bottom, pr, 3.2 + s * 2, 0, 0, 7); g.stroke();
     }
   }
 }
 
 function buildSheet(drawFn, pal) {
-  const f = pose => makePixels(g => drawFn(g, pal, pose));
+  const f = pose => makePixels(g => {
+    drawFn(g, pal, pose);
+    grit(g);
+  });
   const pain = makePixels(g => {
     g.translate(34, 33);
     g.rotate(0.09);
     g.translate(-32, -32);
     drawFn(g, pal, { step: 0, pain: 1 });
+    grit(g);
   });
   const flash = makePixels(g => {
     drawFn(g, pal, { step: 0, pain: 1 });
+    grit(g);
     g.globalCompositeOperation = "source-atop";
     g.fillStyle = "rgba(255,255,255,0.75)";
     g.fillRect(0, 0, 64, 64);
@@ -1004,23 +1778,26 @@ function buildSheet(drawFn, pal) {
     attack: f({ step: 1, attack: 1 }),
     pain,
     flash,
-    dead: [0.35, 0.7, 1].map(s => makePixels(g => drawPuddle(g, pal, s))),
+    dead: [0.35, 0.7, 1].map(s => makePixels(g => {
+      drawPuddle(g, pal, s);
+      grit(g);
+    })),
   };
 }
 
 const SPRITES = {
-  groomp:   buildSheet(drawImp,           { body: "#5e3c1e", lite: "#9a7040", dark: "#2a1608" }),
-  spitter:  buildSheet(drawCacodemon,     { body: "#c02820", lite: "#e05040", dark: "#680e10" }),
-  boss:     buildSheet(drawCyberdemon,    { body: "#4e3828", lite: "#7a6048", dark: "#1e1410" }),
-  wraith:   buildSheet(drawLostSoul,      { body: "#d8ceac", lite: "#ece4c8", dark: "#8a8060" }),
-  skitter:  buildSheet(drawArachnotron,   { body: "#2e3828", lite: "#587050", dark: "#121e12" }),
-  brute:    buildSheet(drawBaron,         { body: "#b86858", lite: "#d88878", dark: "#582828" }),
-  watcher:  buildSheet(drawPainElemental, { body: "#8a4020", lite: "#be6838", dark: "#3a1808" }),
-  hollow:   buildSheet(drawRevenant,      { body: "#d0c8a8", lite: "#ece4c8", dark: "#8a8468" }),
-  maw:      buildSheet(drawPinky,         { body: "#d06060", lite: "#f09090", dark: "#7a2828" }),
-  husk:     buildSheet(drawArchvile,      { body: "#c8b898", lite: "#e8dcc0", dark: "#5a4a30" }),
-  shrieker: buildSheet(drawHellKnight,    { body: "#6a4430", lite: "#9a6a4a", dark: "#2e1a10" }),
-  demon:    buildSheet(drawMancubus,      { body: "#8a8068", lite: "#b0a888", dark: "#3e3828" }),
+  groomp:   buildSheet(drawImp,           { body: "#63431f", lite: "#8f6a38", dark: "#241203" }),
+  spitter:  buildSheet(drawCacodemon,     { body: "#8e1a14", lite: "#c04434", dark: "#42080a" }),
+  boss:     buildSheet(drawCyberdemon,    { body: "#4a3020", lite: "#785640", dark: "#180c06" }),
+  wraith:   buildSheet(drawLostSoul,      { body: "#cfc3a2", lite: "#efe6cc", dark: "#6e6248" }),
+  skitter:  buildSheet(drawArachnotron,   { body: "#26301f", lite: "#4a5c3c", dark: "#0c120a" }),
+  brute:    buildSheet(drawBaron,         { body: "#8a5644", lite: "#b57f62", dark: "#361410" }),
+  watcher:  buildSheet(drawPainElemental, { body: "#6e3018", lite: "#a05a2c", dark: "#2a0e04" }),
+  hollow:   buildSheet(drawRevenant,      { body: "#c4b892", lite: "#e6dcba", dark: "#6a5f42" }),
+  maw:      buildSheet(drawPinky,         { body: "#a34043", lite: "#cd6f62", dark: "#4a1416" }),
+  husk:     buildSheet(drawArchvile,      { body: "#9e9478", lite: "#c8bfa4", dark: "#463e2c" }),
+  shrieker: buildSheet(drawHellKnight,    { body: "#54382a", lite: "#7e5c40", dark: "#1c0e06" }),
+  demon:    buildSheet(drawMancubus,      { body: "#7e7254", lite: "#a89a72", dark: "#322c1c" }),
 };
 
 // ---------------------------------------------------------------- items
